@@ -18,7 +18,7 @@ int main(){
     /* allocate GPU mem */
     cudaMalloc((void **)&dx, nbytes);//思考为什么要用二级指针
     /* allocate CPU mem */
-	hx = (float*) malloc(nbytes);
+    hx = (float*) malloc(nbytes);
     /* init host data */
     printf("hx original: \n");
     for (int i = 0; i < N; i++) {
