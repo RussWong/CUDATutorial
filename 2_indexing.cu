@@ -7,7 +7,7 @@ __global__ void sum(float *x)
     int block_id = blockIdx.x;
     int global_tid = blockIdx.x * blockDim.x + threadIdx.x;
     int local_tid = threadIdx.x;
-	printf("current block=%d, thread id in current block =%d, global thread id=%d\n", block_id, local_tid, global_tid);
+    printf("current block=%d, thread id in current block =%d, global thread id=%d\n", block_id, local_tid, global_tid);
     x[global_tid] += 1;
 }
 
