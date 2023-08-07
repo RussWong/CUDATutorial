@@ -3,7 +3,7 @@
 #include "cuda_runtime.h"
 #include "cooperative_groups.h"
 //#define THREAD_PER_BLOCK 256
-//估计这种warp和shared在老的gpu上面会很有成效，但是在turing后的可能编译器优化了很多
+//估计这种warp和shared在老的gpu上面会很有成效，但是在turing后的GPU，nvcc编译器优化了很多
 //cpu
 int filter(int *dst, int *src, int n) {
   int nres = 0;
@@ -13,14 +13,14 @@ int filter(int *dst, int *src, int n) {
   // return the number of elements copied
   return nres;
 }
-//0.158ms,数据量为256000000时，1.437ms
+//数据量为256000000时，latency=1.437ms
 //cuda naive kernel
 //__global__ void filter_k(int *dst, int *nres, int *src, int n) {
 //  int i = threadIdx.x + blockIdx.x * blockDim.x;
 //  if(i < n && src[i] > 0)
 //    dst[atomicAdd(nres, 1)] = src[i];
 //}
-//0.162ms
+//数据量为256000000时，latency=1.389ms
 // //block level, use block level atomics based on shared memory
 // __global__ 
 // void filter_shared_k(int *dst, int *nres, const int* src, int n) {
@@ -62,7 +62,7 @@ int filter(int *dst, int *src, int n) {
 //     __syncthreads();
 //   }
 // }
-
+//数据量为256000000时，latency=1.389ms
 //warp level, use warp-aggregated atomics
 __device__ int atomicAggInc(int *ctr) {
   unsigned int active = __activemask();
