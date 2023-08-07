@@ -13,14 +13,14 @@ int filter(int *dst, int *src, int n) {
   // return the number of elements copied
   return nres;
 }
-//数据量为256000000时，latency=1.437ms
+//数据量为256000000时，latency=14.37ms
 //cuda naive kernel
 //__global__ void filter_k(int *dst, int *nres, int *src, int n) {
 //  int i = threadIdx.x + blockIdx.x * blockDim.x;
 //  if(i < n && src[i] > 0)
 //    dst[atomicAdd(nres, 1)] = src[i];
 //}
-//数据量为256000000时，latency=1.389ms
+//数据量为256000000时，latency=13.86ms
 // //block level, use block level atomics based on shared memory
 // __global__ 
 // void filter_shared_k(int *dst, int *nres, const int* src, int n) {
@@ -62,22 +62,22 @@ int filter(int *dst, int *src, int n) {
 //     __syncthreads();
 //   }
 // }
-//数据量为256000000时，latency=1.389ms
+//数据量为256000000时，latency=13.79ms
 //warp level, use warp-aggregated atomics
 __device__ int atomicAggInc(int *ctr) {
   unsigned int active = __activemask();
-  int leader = __ffs(active) - 1;
+  int leader = 0;
   int change = __popc(active);//warp mask中为1的数量
   int lane_mask_lt;
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lane_mask_lt));
   unsigned int rank = __popc(active & lane_mask_lt);//比当前线程id小且值为1的mask之和
   int warp_res;
-  if(rank == 0)//leader thread
+  if(rank == 0)//leader thread of every warp
     warp_res = atomicAdd(ctr, change);//compute global offset of warp
   warp_res = __shfl_sync(active, warp_res, leader);//broadcast to every thread
   return warp_res + rank;
 }
-//0.157ms,14.373ms(256000000 data)
+
 __global__ void filter_warp_k(int *dst, int *nres, const int *src, int n) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   if(i >= n)
