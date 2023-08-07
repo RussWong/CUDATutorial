@@ -10,13 +10,10 @@ struct alignas(sizeof(T) * Size) AlignedVector {
 };
 
 __device__ float TanhApprox(float x) {
-#if (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
-  float r;
-  asm("tanh.approx.f32 %0,%1; \n\t" : "=f"(r) : "f"(x));
-  return r;
-#else
+  //float r;
+  //asm("tanh.approx.f32 %0,%1; \n\t" : "=f"(r) : "f"(x));
+  //return r;
   return tanhf(x);
-#endif  // (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
 }
 
 template<typename T>
@@ -43,17 +40,13 @@ struct FusedFastGeluFunctor<half> {
   __device__ FusedFastGeluFunctor() {};
 
   __device__ half operator()(const half x) const {
-#if (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
     const float tanh_in =
         __half2float(__float2half_rn(alpha) * (x + __float2half_rn(beta) * x * x * x));
     const float tanh_out = TanhApprox(tanh_in);
     return __float2half_rn(0.5F) * x * (__float2half_rn(1.0F) + __float2half_rn(tanh_out));
-#else
     return static_cast<half>(float_functor(static_cast<float>(x)));
-#endif  // (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
   }
 
-//#if (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
   __device__ void Apply2(half* y, const half* x) const {
     const half2 x2 = *(reinterpret_cast<const half2*>(x));
     const float2 tanh_in = __half22float2(
@@ -66,7 +59,6 @@ struct FusedFastGeluFunctor<half> {
                                      __hadd2(__float2half2_rn(1.0F), __float22half2_rn(tanh_out))));
     *reinterpret_cast<half2*>(y) = y2;
   }
-//#endif  // (__CUDA_ARCH__ >= 750 && CUDA_VERSION >= 11000)
 };
 
 
@@ -94,8 +86,6 @@ __global__ void FP16FastGeluFwdCUDAKernel(const __half* x,
 }
 
 int main() {
-// static bool TryLaunchFP16FastGeluFwdVectorizeCUDAKernel(
-//     const GPUContext& dev_ctx, const __half* x, __half* y, size_t n) {
     int n = 1000;
     
     __half *x = new __half[n];
@@ -116,9 +106,7 @@ int main() {
     auto is_aligned = [](const void* p, size_t alignment) {
         return reinterpret_cast<uintptr_t>(p) % alignment == 0;
     };
-
-// #define PD_LAUNCH_FP16_FAST_GELU_FWD_KERNEL(__vec_size, __use_fast_math)      \
-//   do {                                                                        
+                                                                      
     constexpr auto kAlignment = alignof(AlignedVector<__half, 8>);                      
     if (n % 8 == 0 && is_aligned(x, kAlignment) && is_aligned(y, kAlignment)) {                                          
       size_t thread = std::min<size_t>(512, deviceProp.GetMaxThreadsPerBlock()); 
@@ -135,13 +123,4 @@ int main() {
     cudaFree(d_x);
     cudaFree(d_y);
                                                                    
-//   } while (0)
-
-//   if (FLAGS_use_fast_math) {
-//     PD_LAUNCH_FP16_FAST_GELU_FWD_KERNEL(8, true);
-//   } else {
-//     PD_LAUNCH_FP16_FAST_GELU_FWD_KERNEL(8, false);
-//   }
-
-// #undef PD_LAUNCH_FP16_FAST_GELU_FWD_KERNEL
 }
