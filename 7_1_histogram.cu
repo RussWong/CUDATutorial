@@ -18,7 +18,7 @@ __global__ void histgram(int *hist_data, int *bin_data, int N)
     __syncthreads();//此刻每个block的bin都已统计在cache这个smem中
     atomicAdd(&bin_data[tid], cache[tid]);
 }
-//error, expected ")"
+
 bool CheckResult(int *out, int* groudtruth, int N){
     for (int i = 0; i < N; i++){
         if (out[i] != groudtruth[i]) {
