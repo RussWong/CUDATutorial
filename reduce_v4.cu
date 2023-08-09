@@ -21,7 +21,8 @@ __device__ void WarpSharedMemReduce(volatile float* smem, int tid){
     x += smem[tid + 1]; __syncwarp();
     smem[tid] = x; __syncwarp();
 }
-
+// Note: using blockSize as a template arg can benefit from NVCC compiler optimization, 
+// which is better than using blockDim.x that is known in runtime.
 template<int blockSize>
 __global__ void reduce_v4(float *d_in,float *d_out){
     __shared__ float smem[blockSize];
