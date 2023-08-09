@@ -5,26 +5,26 @@
 //latency: 1.147ms
 template<int blockSize>
 __global__ void reduce_v3(float *d_in, float *d_out){
-    __shared__ float sdata[blockSize];
+    __shared__ float smem[blockSize];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockSize * 2) + threadIdx.x;
+    unsigned int gtid = blockIdx.x * (blockSize * 2) + threadIdx.x;
     // load: 每个线程加载两个元素到shared mem对应位置
-    sdata[tid] = d_in[i] + d_in[i + blockSize];
+    smem[tid] = d_in[gtid] + d_in[gtid + blockSize];
     __syncthreads();
 
     // compute: reduce in shared mem
     // 思考这里是如何并行的
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sdata[tid] += sdata[tid + s];
+    for (unsigned int index = blockDim.x / 2; index > 0; index >>= 1) {
+        if (tid < index) {
+            smem[tid] += smem[tid + index];
         }
         __syncthreads();
     }
 
     // store: write back to global mem
     if (tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
