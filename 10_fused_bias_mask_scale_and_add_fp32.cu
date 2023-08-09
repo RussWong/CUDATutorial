@@ -3,19 +3,19 @@
 #include "cuda_runtime.h"
 
 template<typename T>
-struct MaskAndScaleAddFunctor {
-  MaskAndScaleAddFunctor(const uint8_t* mask, const T* addend, float scale)
-      : mask(mask), addend(addend), scale(scale) {}
+struct MaskScaleAndElementwiseAddFunctor {
+  MaskScaleAndElementwiseAddFunctor(const uint8_t* mask, const T* add_val, float scale)
+      : mask(mask), add_val(add_val), scale(scale) {}
   __device__ T Compute(T x, int64_t i) const {
-    return x * static_cast<T>(static_cast<bool>(mask[i]) * scale) + addend[i];
+    return x * static_cast<T>(static_cast<bool>(mask[i]) * scale) + add_val[i];
   }
   const uint8_t* mask;
-  const T* addend;
+  const T* add_val;
   float scale;
 };
 
 template<typename FUNCTOR, typename T>
-__global__ void FusedBiasAddGpufloat(FUNCTOR functor, const int elem_cnt, const int bias_size,
+__global__ void FusedBiasAddCUDAKernelFloat(FUNCTOR functor, const int elem_cnt, const int bias_size,
                                 const T* x, const T* bias, T* y) {
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < elem_cnt;
        i += blockDim.x * gridDim.x){
@@ -28,10 +28,10 @@ int main(){
     int ele_cnt = 1000;
     float scale = 0.5;
     uint8_t* mask_tensor = new uint8_t[1000];
-    float* addend = new float[1000];
+    float* add_val = new float[1000];
     for (int i = 0; i < 1000; i++){
         mask_tensor[i] = (uint8_t)(i);
-        addend[i] = (float)(i);
+        add_val[i] = (float)(i);
     }
     int bias_size = 10;
     float *x = (float*) malloc(sizeof(float) * ele_cnt);
@@ -55,17 +55,17 @@ int main(){
     int maxblocks = deviceProp.maxGridSize[0];
     int blockSize = 256;
     int gridSize = std::min((ele_cnt + blockSize - 1) / blockSize, maxblocks);
-    MaskAndScaleAddFunctor<float> mask_and_scale_add_functor(mask_tensor, addend, scale);
-    FusedBiasAddGpufloat<<<gridSize , blockSize>>>(mask_and_scale_add_functor, ele_cnt, bias_size, d_x, d_bias, d_y);
+    MaskScaleAndElementwiseAddFunctor<float> mask_scale_and_elementwise_add_func(mask_tensor, add_val, scale);
+    FusedBiasAddCUDAKernelFloat<<<gridSize , blockSize>>>(mask_scale_and_elementwise_add_func, ele_cnt, bias_size, d_x, d_bias, d_y);
     cudaMemcpy(y, d_y, sizeof(float) * ele_cnt, cudaMemcpyDeviceToHost);
     printf("pass");
     free(x);
     free(y);
     free(bias);
-    delete addend;
-    addend = nullptr;
+    delete add_val;
+    add_val = nullptr;
     delete mask_tensor;
-    addend = nullptr;
+    add_val = nullptr;
     cudaFree(d_x);
     cudaFree(d_y);
     cudaFree(d_bias);
