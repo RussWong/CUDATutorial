@@ -18,11 +18,11 @@ __device__ float TanhApprox(float x) {
 }
 
 template<typename T>
-struct FusedGeluFunctor {
+struct GeluFunctor {
   static constexpr T alpha = static_cast<T>(0.7978845608028654);
   static constexpr T beta = static_cast<T>(0.044714998453855515);
 
-  __device__ FusedGeluFunctor() {};
+  __device__ GeluFunctor() {};
 
   __device__ T operator()(T x) const {
     const T half = static_cast<T>(0.5);
@@ -33,21 +33,23 @@ struct FusedGeluFunctor {
 };
 
 template<>
-struct FusedGeluFunctor<half> {
-  static constexpr float alpha = FusedGeluFunctor<float>::alpha;
-  static constexpr float beta = FusedGeluFunctor<float>::beta;
-  FusedGeluFunctor<float> float_functor;
+struct GeluFunctor<half> {
+  static constexpr float alpha = GeluFunctor<float>::alpha;
+  static constexpr float beta = GeluFunctor<float>::beta;
+  GeluFunctor<float> float_functor;
 
-  __device__ FusedGeluFunctor() {};
+  __device__ GeluFunctor() {};
 
   __device__ half operator()(const half x) const {
     //const float tanh_in =
     //    __half2float(__float2half_rn(alpha) * (x + __float2half_rn(beta) * x * x * x));
     //const float tanh_out = TanhApprox(tanh_in);
     //return __float2half_rn(0.5f) * x * (__float2half_rn(1.0f) + __float2half_rn(tanh_out));
+    // Note: half to float will lose performance using static_cast, because static_cast will be compiled to more instructions than half intrinsic,
+    // so you should better use half intrinsic when you have ampere GPU, you can enable 44-47 line
     return static_cast<half>(float_functor(static_cast<float>(x)));
   }
-
+  // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic.
   //__device__ void Apply2(half* y, const half* x) const {
     //const half2 x2 = *(reinterpret_cast<const half2*>(x));
     //const float2 tanh_in = __half22float2(
@@ -64,13 +66,13 @@ struct FusedGeluFunctor<half> {
 
 
 template <int VecSize>
-__global__ void FP16GeluFwdCUDAKernel(const __half* x,
+__global__ void FP16GeluCUDAKernel(const __half* x,
                                                  __half* y,
                                                  int n) {
   int offset =
       static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x) * VecSize;
   int stride = static_cast<int>(blockDim.x * gridDim.x) * VecSize;
-  FusedGeluFunctor<half> gelu_fwd;
+  GeluFunctor<half> gelu_fwd;
   __half y_reg[VecSize];
   for (; offset < n; offset += stride) {
     using ArrT = AlignedVector<__half, VecSize>;
@@ -113,15 +115,16 @@ int main() {
         return reinterpret_cast<uintptr_t>(p) % alignment == 0;
     };
                                                                       
-    constexpr auto kAlignment = alignof(AlignedVector<__half, 8>);                      
+    constexpr auto kAlignment = alignof(AlignedVector<__half, 8>); 
+    // Note: when you have ampere GPU, you can enable the 122-124 line to get performance improvement by half2 intrinsic.
     if (n % 8 == 0 && is_aligned(x, kAlignment) && is_aligned(y, kAlignment)) {                                          
       int thread = std::min<int>(512, deviceProp.maxThreadsPerBlock); 
       //int block = (n / 8 + thread - 1) / thread;                  
       //block = std::min<int>(block, deviceProp.maxGridSize[0]);                                  
-      //FP16GeluFwdCUDAKernel<8, true><<<block, thread>>>(x, y, n);  
+      //FP16GeluCUDAKernel<8, true><<<block, thread>>>(x, y, n);  
       int block = (n + thread - 1) / thread;                  
       block = std::min<int>(block, deviceProp.maxGridSize[0]);                                  
-      FP16GeluFwdCUDAKernel<1><<<block, thread>>>(d_x, d_y, n);                      
+      FP16GeluCUDAKernel<1><<<block, thread>>>(d_x, d_y, n);                      
       cudaMemcpy(y, d_y, sizeof(__half) * n, cudaMemcpyDeviceToHost);                                                          
     }   
     printf("pass");
