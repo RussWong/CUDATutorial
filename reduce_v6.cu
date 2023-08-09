@@ -5,34 +5,34 @@
 // multi-block reduce two pass
 // latency: 1.815ms
 template <int blockSize>
-__device__ void BlockReduce(float* sdata) {
+__device__ void BlockSharedMemReduce(float* smem) {
   if (blockSize >= 1024) {
     if (threadIdx.x < 512) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 512];
+      smem[threadIdx.x] += smem[threadIdx.x + 512];
     }
     __syncthreads();
   }
   if (blockSize >= 512) {
     if (threadIdx.x < 256) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 256];
+      smem[threadIdx.x] += smem[threadIdx.x + 256];
     }
     __syncthreads();
   }
   if (blockSize >= 256) {
     if (threadIdx.x < 128) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 128];
+      smem[threadIdx.x] += smem[threadIdx.x + 128];
     }
     __syncthreads();
   }
   if (blockSize >= 128) {
     if (threadIdx.x < 64) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 64];
+      smem[threadIdx.x] += smem[threadIdx.x + 64];
     }
     __syncthreads();
   }
   // the final warp
   if (threadIdx.x < 32) {
-    volatile float* vshm = sdata;
+    volatile float* vshm = smem;
     if (blockDim.x >= 64) {
       vshm[threadIdx.x] += vshm[threadIdx.x + 32];
     }
@@ -46,26 +46,26 @@ __device__ void BlockReduce(float* sdata) {
 
 template <int blockSize>
 __global__ void reduce_v6(float *d_in, float *d_out, int nums){
-    __shared__ float sdata[blockSize];
+    __shared__ float smem[blockSize];
 
     unsigned int tid = threadIdx.x;
     unsigned int gtid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int total_thread_num = blockDim.x * gridDim.x;
     // unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
-    // sdata[tid] = d_in[i] + d_in[i + blockDim.x];
+    // smem[tid] = d_in[i] + d_in[i + blockDim.x];
     // load: 每个线程负责若干个元素的thread local求和，最后存到shared mem对应位置
     float sum = 0.0f;
     for (int32_t i = gtid; i < nums; i += total_thread_num) {
         sum += d_in[i];
     }
-    sdata[tid] = sum;
+    smem[tid] = sum;
     __syncthreads();
     // compute: reduce in shared mem
-    BlockReduce<blockSize>(sdata);
+    BlockSharedMemReduce<blockSize>(smem);
 
     // store: write back to global mem
     if (tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
