@@ -5,34 +5,34 @@
 #define THREAD_PER_BLOCK 256
 // latency: 0.656ms
 template <int blockSize>
-__device__ void BlockReduce(float* sdata) {
+__device__ void BlockSharedMemReduce(float* smem) {
   if (blockSize >= 1024) {
     if (threadIdx.x < 512) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 512];
+      smem[threadIdx.x] += smem[threadIdx.x + 512];
     }
     __syncthreads();
   }
   if (blockSize >= 512) {
     if (threadIdx.x < 256) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 256];
+      smem[threadIdx.x] += smem[threadIdx.x + 256];
     }
     __syncthreads();
   }
   if (blockSize >= 256) {
     if (threadIdx.x < 128) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 128];
+      smem[threadIdx.x] += smem[threadIdx.x + 128];
     }
     __syncthreads();
   }
   if (blockSize >= 128) {
     if (threadIdx.x < 64) {
-      sdata[threadIdx.x] += sdata[threadIdx.x + 64];
+      smem[threadIdx.x] += smem[threadIdx.x + 64];
     }
     __syncthreads();
   }
   // the final warp
   if (threadIdx.x < 32) {
-    volatile float* vshm = sdata;
+    volatile float* vshm = smem;
     if (blockDim.x >= 64) {
       vshm[threadIdx.x] += vshm[threadIdx.x + 32];
     }
@@ -46,19 +46,19 @@ __device__ void BlockReduce(float* sdata) {
 
 template <int blockSize>
 __global__ void reduce_v5(float *d_in, float *d_out){
-    __shared__ float sdata[THREAD_PER_BLOCK];
+    __shared__ float smem[THREAD_PER_BLOCK];
 
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
     // load: 每个线程加载两个元素到shared mem对应位置
-    sdata[tid] = d_in[i] + d_in[i + blockDim.x];
+    smem[tid] = d_in[i] + d_in[i + blockDim.x];
     __syncthreads();
     // compute: reduce in shared mem
-    BlockReduce<blockSize>(sdata);
+    BlockSharedMemReduce<blockSize>(smem);
 
     // store: write back to global mem
     if (tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
@@ -75,7 +75,7 @@ bool CheckResult(float *out, float groudtruth, int n){
 
 int main(){
     float milliseconds = 0;
-    //const int N = 32 * 1024 * 1024;
+    
     const int N = 25600000;
     cudaSetDevice(0);
     cudaDeviceProp deviceProp;
