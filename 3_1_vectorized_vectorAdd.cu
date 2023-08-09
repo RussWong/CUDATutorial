@@ -6,7 +6,7 @@
 #define MEMORY_OFFSET 10000000
 #define BENCH_ITER 10
 #define THREADS_NUM 256
-//confirm true
+//global memory bandwidth = 349Gb/s
 //float4 vectoradd
 __global__ void mem_bw (float* A,  float* B, float* C){
 	// block and thread index
