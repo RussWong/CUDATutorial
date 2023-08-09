@@ -4,50 +4,50 @@
 
 
 //latency: 0.694ms
-__device__ void WarpReduce(volatile float* sdata, unsigned int tid){
-    float x = sdata[tid];
+__device__ void WarpSharedMemReduce(volatile float* smem, int tid){
+    float x = smem[tid];
     if (blockDim.x >= 64) {
-      x += sdata[tid + 32]; __syncwarp();
-      sdata[tid] = x; __syncwarp();
+      x += smem[tid + 32]; __syncwarp();
+      smem[tid] = x; __syncwarp();
     }
-    x += sdata[tid + 16]; __syncwarp();
-    sdata[tid] = x; __syncwarp();
-    x += sdata[tid + 8]; __syncwarp();
-    sdata[tid] = x; __syncwarp();
-    x += sdata[tid + 4]; __syncwarp();
-    sdata[tid] = x; __syncwarp();
-    x += sdata[tid + 2]; __syncwarp();
-    sdata[tid] = x; __syncwarp();
-    x += sdata[tid + 1]; __syncwarp();
-    sdata[tid] = x; __syncwarp();
+    x += smem[tid + 16]; __syncwarp();
+    smem[tid] = x; __syncwarp();
+    x += smem[tid + 8]; __syncwarp();
+    smem[tid] = x; __syncwarp();
+    x += smem[tid + 4]; __syncwarp();
+    smem[tid] = x; __syncwarp();
+    x += smem[tid + 2]; __syncwarp();
+    smem[tid] = x; __syncwarp();
+    x += smem[tid + 1]; __syncwarp();
+    smem[tid] = x; __syncwarp();
 }
 
 template<int blockSize>
 __global__ void reduce_v4(float *d_in,float *d_out){
-    __shared__ float sdata[blockSize];
+    __shared__ float smem[blockSize];
 
-    unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockSize * 2) + threadIdx.x;
+    int tid = threadIdx.x;
+    int i = blockIdx.x * (blockSize * 2) + threadIdx.x;
     // load: 每个线程加载两个元素到shared mem对应位置
-    sdata[tid] = d_in[i] + d_in[i + blockSize];
+    smem[tid] = d_in[i] + d_in[i + blockSize];
     __syncthreads();
 
     // compute: reduce in shared mem
     // 思考这里是如何并行的
-    for (unsigned int s = blockDim.x / 2; s > 32; s >>= 1) {
+    for (int s = blockDim.x / 2; s > 32; s >>= 1) {
         if (tid < s) {
-            sdata[tid] += sdata[tid + s];
+            smem[tid] += smem[tid + s];
         }
         __syncthreads();
     }
 
     // last warp拎出来单独作reduce
     if (tid < 32) {
-        WarpReduce(sdata, tid);
+        WarpSharedMemReduce(smem, tid);
     }
     // store: write back to global mem
     if (tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
