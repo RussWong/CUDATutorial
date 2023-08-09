@@ -7,12 +7,12 @@
 // bank conflict
 template<int blockSize>
 __global__ void reduce_v1(float *d_in,float *d_out){
-    __shared__ float sdata[blockSize];
+    __shared__ float smem[blockSize];
 
     unsigned int tid = threadIdx.x;
     //unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
     // load: 每个线程加载一个元素到shared mem对应位置
-    sdata[tid] = d_in[tid];
+    smem[tid] = d_in[tid];
     __syncthreads();
 
     // compute: reduce in shared mem
@@ -20,14 +20,14 @@ __global__ void reduce_v1(float *d_in,float *d_out){
     for(unsigned int s = 1; s < blockDim.x; s *= 2) {
         int index = 2 * s * tid;
         if (index < blockDim.x) {
-            sdata[index] += sdata[index + s];
+            smem[index] += smem[index + s];
         }
         __syncthreads();
     }
 
     // store: write back to global mem
     if (tid == 0) {
-        d_out[blockIdx.x] = sdata[0];
+        d_out[blockIdx.x] = smem[0];
     }
 }
 
