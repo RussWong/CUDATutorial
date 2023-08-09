@@ -6,7 +6,7 @@
 #define MEMORY_OFFSET 10000000
 #define BENCH_ITER 10
 #define THREADS_NUM 256
-//global memory bandwidth = 349Gb/s
+//global memory bandwidth = 522Gb/s
 //float4 vectoradd
 __global__ void mem_bw (float* A,  float* B, float* C){
 	// block and thread index
@@ -84,5 +84,5 @@ int main(){
 	printf("Result right\n");
 	unsigned N = ARRAY_SIZE * 4;
 
-	printf("Mem BW= %f (GB/sec)\n", 2 * (float)N / milliseconds / 1e6);//348g/sec达到T4 320+Gb/sec
+	printf("Mem BW= %f (GB/sec)\n", 3 * (float)N / milliseconds / 1e6);//522g/sec达到T4 320+Gb/sec
 }
