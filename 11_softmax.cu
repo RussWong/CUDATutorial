@@ -116,56 +116,56 @@ __global__ void WarpSoftmax(const float* src, float* dst, const int rows, const 
   const int step = num_global_warp * rows_per_thread;
   for (int row = global_warp_id * rows_per_thread; row < rows; row += step) {
     float thread_max[rows_per_thread];
-#pragma unroll
+
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       thread_max[row_id] = -Inf<float>();
       float* row_buf = buf[row_id];
-#pragma unroll
+
       for (int pack_id = 0; pack_id < num_packs; ++pack_id) {
         const int pack_offset = pack_id * pack_size;
         const int col = (pack_id * warp_width + lane_id) * pack_size;
         if (col < cols) {
           // load (row+row_id, col) data from src to reg row_buf
           load<pack_size>(src, row_buf + pack_offset, row + row_id, rows, col);
-#pragma unroll
+
           for (int i = 0; i < pack_size; ++i) {
             thread_max[row_id] = max(thread_max[row_id], row_buf[pack_offset + i]);
           }
         } else {
-#pragma unroll
+
           for (int i = 0; i < pack_size; ++i) { row_buf[pack_offset + i] = -Inf<float>(); }
         }
       }
     }
     float warp_max[rows_per_thread];
-#pragma unroll
+
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       warp_max[row_id] = WarpReduce<MaxOp, float, warp_width>(thread_max[row_id]);
     }
     float thread_sum[rows_per_thread];
-#pragma unroll
+
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       thread_sum[row_id] = 0;
       float* row_buf = buf[row_id];
-#pragma unroll
+
       for (int i = 0; i < cols_per_thread; ++i) {
         row_buf[i] = Exp(row_buf[i] - warp_max[row_id]);
         thread_sum[row_id] += row_buf[i];
       }
     }
     float warp_sum[rows_per_thread];
-#pragma unroll
+
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       warp_sum[row_id] = WarpReduce<SumOp, float, warp_width>(thread_sum[row_id]);
     }
-#pragma unroll
+
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       float* row_buf = buf[row_id];
-#pragma unroll
+
       for (int i = 0; i < cols_per_thread; ++i) {
         row_buf[i] = Div(row_buf[i], warp_sum[row_id]);
       }
-#pragma unroll
+
       for (int i = 0; i < num_packs; ++i) {
         const int col = (i * warp_width + lane_id) * pack_size;
         if (col < cols) {
