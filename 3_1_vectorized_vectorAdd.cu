@@ -6,7 +6,19 @@
 #define MEMORY_OFFSET 10000000
 #define BENCH_ITER 10
 #define THREADS_NUM 256
-//global memory bandwidth = 522Gb/s
+
+__device__ __forceinline__
+float4 LoadFromGlobalPTX(float4 *ptr) {
+    float4 ret;
+    asm volatile (
+        "ld.global.v4.f32 {%0, %1, %2, %3}, [%4];"
+        : "=f"(ret.x), "=f"(ret.y), "=f"(ret.z), "=f"(ret.w)
+        : "l"(ptr)
+    );
+
+    return ret;
+}
+
 //float4 vectoradd
 __global__ void mem_bw (float* A,  float* B, float* C){
 	// block and thread index
