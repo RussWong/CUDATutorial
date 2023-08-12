@@ -10,17 +10,22 @@
 //float4 vectoradd
 __global__ void mem_bw (float* A,  float* B, float* C){
 	// block and thread index
-	//int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	// int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
 	for(int i = idx; i < MEMORY_OFFSET / 4; i += blockDim.x * gridDim.x) {
 		float4 a1 = reinterpret_cast<float4*>(A)[i];
 		float4 b1 = reinterpret_cast<float4*>(B)[i];
 		float4 c1;
-
+    		// 向量加法
 		c1.x = a1.x + b1.x;
 		c1.y = a1.y + b1.y;
 		c1.z = a1.z + b1.z;
 		c1.w = a1.w + b1.w;
+		//测量显存带宽
+		//c1.x = 0;
+		//c1.y = 0;
+		//c1.z = 0;
+		//c1.w = 0;
 		reinterpret_cast<float4*>(C)[i] = c1;
 	}
 }
@@ -55,7 +60,7 @@ int main(){
 	int BlockNums = MEMORY_OFFSET / 256;
     //warm up to occupy L2 cache
 	printf("warm up start\n");
-	mem_bw<<<BlockNums, THREADS_NUM>>>(A_g, B_g, C_g);
+	mem_bw<<<BlockNums / 4, THREADS_NUM>>>(A_g, B_g, C_g);
 	printf("warm up end\n");
     // time start using cudaEvent
 	cudaEvent_t start, stop;
@@ -63,7 +68,7 @@ int main(){
 	cudaEventCreate(&stop);
 	cudaEventRecord(start);
 	for (int i = BENCH_ITER - 1; i >= 0; --i) {
-		mem_bw<<<BlockNums, THREADS_NUM>>>(A_g + i * MEMORY_OFFSET, B_g + i * MEMORY_OFFSET, C_g + i * MEMORY_OFFSET);
+		mem_bw<<<BlockNums / 4, THREADS_NUM>>>(A_g + i * MEMORY_OFFSET, B_g + i * MEMORY_OFFSET, C_g + i * MEMORY_OFFSET);
 	}
 	// time stop using cudaEvent
 	cudaEventRecord(stop);
@@ -77,6 +82,7 @@ int main(){
 
 	/* check GPU result with CPU*/
 	for (int i = 0; i < 20; ++i) {
+		/* 测量显存带宽时, 修改C_cpu_res[i]为0 */
 		if (fabs(C_cpu_res[i] - C[i]) > 1e-6) {
 			printf("Result verification failed at element index %d!\n", i);
 		}
