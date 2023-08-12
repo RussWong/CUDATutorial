@@ -13,19 +13,24 @@ __global__ void mem_bw (float* A,  float* B, float* C){
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	// int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
 	for(int i = idx; i < MEMORY_OFFSET / 4; i += blockDim.x * gridDim.x) {
+		//问题1: 删除33-44行,会发现带宽数据为2666g/S
+		//尝试: 使用nv ptx load global memory指令,结果数据依然没变
+		//结论: 大概率是编译器优化,读了数据不做操作那就会不读
 		float4 a1 = reinterpret_cast<float4*>(A)[i];
+		//float4 a1 = LoadFromGlobalPTX(reinterpret_cast<float4*>(A) + i);
 		float4 b1 = reinterpret_cast<float4*>(B)[i];
-		float4 c1;
-    		// 向量加法
-		c1.x = a1.x + b1.x;
-		c1.y = a1.y + b1.y;
-		c1.z = a1.z + b1.z;
-		c1.w = a1.w + b1.w;
-		//测量显存带宽
-		//c1.x = 0;
-		//c1.y = 0;
-		//c1.z = 0;
-		//c1.w = 0;
+		//float4 b1 = LoadFromGlobalPTX(reinterpret_cast<float4*>(B) + i);
+		//float4 c1;
+    		// 测量显存带宽方法1:向量加法,248.8g/s
+		//c1.x = a1.x + b1.x;
+		//c1.y = a1.y + b1.y;
+		//c1.z = a1.z + b1.z;
+		//c1.w = a1.w + b1.w;
+		// 测量显存带宽方法2:copy操作,242.3g/s	
+		c1.x = a1.x;
+		c1.y = a1.y;
+		c1.z = a1.z;
+		c1.w = a1.w;
 		reinterpret_cast<float4*>(C)[i] = c1;
 	}
 }
@@ -89,7 +94,7 @@ int main(){
 	}
 	printf("Result right\n");
 	unsigned N = ARRAY_SIZE * 4;
-
+	/* 测量显存带宽时, 根据实际读写的数组个数, 指定98行是1/2/3 */
 	printf("Mem BW= %f (GB/sec)\n", 3 * (float)N / milliseconds / 1e6);
   	cudaFree(A_g);
   	cudaFree(B_g);
