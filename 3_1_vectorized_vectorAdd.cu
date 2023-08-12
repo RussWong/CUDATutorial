@@ -90,5 +90,13 @@ int main(){
 	printf("Result right\n");
 	unsigned N = ARRAY_SIZE * 4;
 
-	printf("Mem BW= %f (GB/sec)\n", 3 * (float)N / milliseconds / 1e6);//522g/sec达到T4 320+Gb/sec
+	printf("Mem BW= %f (GB/sec)\n", 3 * (float)N / milliseconds / 1e6);
+  	cudaFree(A_g);
+  	cudaFree(B_g);
+  	cudaFree(C_g);
+
+  	free(A);
+  	free(B);
+  	free(C);
+  	free(C_cpu_res);
 }
