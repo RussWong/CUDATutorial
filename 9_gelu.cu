@@ -41,6 +41,7 @@ struct GeluFunctor<half> {
   __device__ GeluFunctor() {};
 
   __device__ half operator()(const half x) const {
+    // Note: when you have ampere GPU, you can enable the line45-50 method to get performance improvement by half intrinsic instead of static_cast half to fp32.
     //const float tanh_in =
     //    __half2float(__float2half_rn(alpha) * (x + __float2half_rn(beta) * x * x * x));
     //const float tanh_out = TanhApprox(tanh_in);
@@ -84,8 +85,10 @@ __global__ void FP16GeluCUDAKernel(const __half* x,
     if (VecSize == 1){
         y_reg[0] = gelu_fwd(in[0]);
     } else {
-        for (int i = 0; i < VecSize; i+=2) {
+      // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic.
+      //for (int i = 0; i < VecSize; i+=2) {
       //gelu_fwd.apply2(y + offset, in[i]);
+        for (int i = 0; i < VecSize; i++) {
             y_reg[i] = gelu_fwd(in[i]);
         }
     }
