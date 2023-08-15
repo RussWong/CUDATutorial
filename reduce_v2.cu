@@ -8,9 +8,9 @@ __global__ void reduce_v2(float *d_in,float *d_out){
     __shared__ float smem[blockSize];
 
     unsigned int tid = threadIdx.x;
-    //unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
+    unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
     // load: 每个线程加载一个元素到shared mem对应位置
-    smem[tid] = d_in[tid];
+    smem[tid] = d_in[gtid];
     __syncthreads();
 
     // compute: reduce in shared mem
