@@ -16,7 +16,7 @@ __global__ void reduce_v0(float *d_in,float *d_out){
     // compute: reduce in shared mem
     // 思考这里是如何并行的
     for(int index = 1; index < blockDim.x; index *= 2) {
-        if (tid % (2 * s) == 0) {
+        if (tid % (2 * index) == 0) {
             smem[tid] += smem[tid + index];
         }
         __syncthreads();
