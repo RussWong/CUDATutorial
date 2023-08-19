@@ -57,6 +57,7 @@ struct MaxOp {
 template<template<typename> class ReductionOp, typename T, int warp_width = WarpSize>
 __inline__ __device__ T WarpReduce(T val) {
   for (int mask = warp_width / 2; mask > 0; mask /= 2) {
+    // you can change L61 with __shfl_down_sync like 6_warp_level_reduce and see performance change
     val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
   }
   return val;
