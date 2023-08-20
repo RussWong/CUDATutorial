@@ -3,7 +3,7 @@
 #include <cuda_fp16.h>
 #include "cuda_runtime.h"
 #define LOOP_TIMES 1000
-//8.08 TFLOPS
+//T4 fp32: 8.08 TFLOPS
 __global__ void FP32FLOPS(int* start, int* stop, float* x, float* y, float* result) {
     int gtid = blockDim.x * blockIdx.x + threadIdx.x;
     float d1 = x[gtid];
@@ -12,7 +12,10 @@ __global__ void FP32FLOPS(int* start, int* stop, float* x, float* y, float* resu
     int start_time = 0;
     // only measure the computation time, eliminate the memory access time
     asm volatile ("mov.u32 %0, %%clock;" : "=r"(start_time) :: "memory");
-    // we use >2(3 or 4) fma instruction to hide for loop comparsion and addition instruction overhead
+    // Q1: why use 4 fma instruction to get GPU peak performance?
+    // A1: we use >2(3or4) fma instruction to hide for loop comparsion and addition instruction overhead
+    // Q2: why use 4 dependant fma instruction to get GPU peak performance, can we use 4 independant ones?
+    // A2: yes, we can use 2/3/4 independant ones
     for (int i = 0; i < LOOP_TIMES; i++) {
         //asm volatile ("{\n\t""fma.rn.f32 %0, %1, %2 , %0; \n\t"
         //                     "fma.rn.f32 %0, %1, %2 , %0; \n\t"
