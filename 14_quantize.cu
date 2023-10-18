@@ -1,19 +1,24 @@
 #include <cmath>
+#include <cfenv>
 #include <random>
 #include <bits/stdc++.h>
 #include <float.h>
 #include <cuda.h>
 #include "cuda_runtime.h"
-// still have bug, waiting for correct..
+// waiting for validating
+__device__ float gpunearbyint(float a) {
+  return std::nearbyint(a);
+}
+
 bool CheckResult(float *out, float* groudtruth, int nums){
     for (int i = 0; i < nums; i++){
       if (groudtruth[i] != out[i]) {
+        printf("the wrong index is %d, the groudtruth is %f, the res is %f\n", i, groudtruth[i], out[i]);
         return false;
       }
     }
     return true;
 }
-// python version
 // def gen_quant_scale_for_min_max_symmetric(weight, quantization_bit):
 //     weight_max = np.max(np.abs(weight))
 //     denominator = 2.0 ** (quantization_bit - 1) - 1
@@ -24,13 +29,13 @@ void GenScalePerTensorSymmetricCPU(const T* in_ptr, const int quantization_bit,
                             const int num_elements, T* scale, T* zero_point) {
   T in_max = *std::max_element(in_ptr, in_ptr + num_elements);
   T in_min = *std::min_element(in_ptr, in_ptr + num_elements);
-  in_max = std::max(std::abs(in_max), std::abs(in_min));
+  T out_max = std::max(std::abs(in_max), std::abs(in_min));
+  //printf("weight_max_cpu is %f, std::abs(in_max) is %f, std::abs(in_min) is %f\n",out_max,std::abs(in_max),std::abs(in_min));
   T denominator = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
-  *scale = in_max / denominator;
+  *scale = out_max / denominator;
   *zero_point = 0;
 }
 
-// python version
 // def gen_quant_scale_for_min_max_affine(weight, quantization_bit):
 //     weight_max = np.max(weight)
 //     weight_min = np.min(weight)
@@ -43,9 +48,11 @@ template<typename T>
 void QuantizationPerTensorSymmetricCPU(const T* in_ptr, const T scale, const int quantization_bit,
                                    const int num_elements, T* out_ptr) {
   T upper_bound = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
-  T lower_bound = -1 * upper_bound - 1;
+  T lower_bound = -upper_bound - 1;
+  //printf("scaleCPU is %f\n", scale);
   for(int j = 0; j < num_elements; j++) {
     T out = std::nearbyint(in_ptr[j] / scale);
+    //if (j==328) printf("in_ptrCPU is %f, outCPU is %f\n", in_ptr[j], out);
     out = out > upper_bound ? upper_bound : out;
     out = out < lower_bound ? lower_bound : out;
     out_ptr[j] = out;
@@ -57,38 +64,68 @@ void QuantizationPerTensorSymmetricCPU(const T* in_ptr, const T scale, const int
 //     lower_bound = 0
 //     return np.clip(np.rint(input / scale + zero_point), lower_bound, upper_bound)
 
-inline __device__ float atomicMax(float *addr, float value) {
-  float old = *addr, assumed;
-  if (old >= value) return old;
+template<typename T>
+void GenScalePerChannelSymmetricCPU(const T* in_ptr, const int quantization_bit, const int HW, const int channel,
+                            const int num_elements, T* scale, T* zero_point) {
+  for (int cid = 0; cid < channel; cid++){
+    int start = cid * HW;
+    int end = (cid + 1) * HW;
+    T channel_max = *std::max_element(in_ptr + start, in_ptr + end);
+    T channel_min = *std::min_element(in_ptr + start, in_ptr + end);// note: cannot use [] which get a float, must use + to get pointer
+    T out_max = std::max(std::abs(channel_max), std::abs(channel_min));
+    //printf("weight_max_cpu is %f, std::abs(in_max) is %f, std::abs(in_min) is %f\n",out_max,std::abs(in_max),std::abs(in_min));
+    T denominator = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
+    scale[cid] = out_max / denominator;
+    zero_point[cid] = 0;
+  }
+}
+template<typename T>
+void QuantizationPerChannelSymmetricCPU(const T* in_ptr, const T* scale, const int quantization_bit, const int HW,
+                                   const int num_elements, T* out_ptr) {
+  T upper_bound = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
+  T lower_bound = -upper_bound - 1;
+  //printf("scaleCPU is %f\n", scale);
+  for(int j = 0; j < num_elements; j++) {
+    T out = std::nearbyint(in_ptr[j] / scale[j / HW]);
+    //if (j==328) printf("in_ptrCPU is %f, outCPU is %f\n", in_ptr[j], out);
+    out = out > upper_bound ? upper_bound : out;
+    out = out < lower_bound ? lower_bound : out;
+    out_ptr[j] = out;
+  }
+}
+inline __device__ float atomicMax(float *address, float val) {
+  int* address_as_i = (int*)address;
+  int old = *address_as_i;
+  int assumed = 0;
   do {
     assumed = old;
-    old = atomicCAS((unsigned int *)addr, __float_as_int(assumed),
-                    __float_as_int(value));
+    old = atomicCAS(address_as_i, assumed,  __float_as_int(fmaxf(val, __int_as_float(assumed))));
 
   } while (old != assumed);
 
-  return old;
+  return __int_as_float(old);
 }
 
-inline __device__ float atomicMin(float *addr, float value) {
-  float old = *addr, assumed;
-  if (old <= value) return old;
+inline __device__ float atomicMin(float *address, float val) {
+  int* address_as_i = (int*)address;
+  int old = *address_as_i;
+  int assumed = 0;
+  //if (old >= value) return old;
   do {
     assumed = old;
-    old = atomicCAS((unsigned int *)addr, __float_as_int(assumed),
-                    __float_as_int(value));
+    old = atomicCAS(address_as_i, assumed,  __float_as_int(fminf(val, __int_as_float(assumed))));
+                    //__float_as_int(value));
 
   } while (old != assumed);
 
-  return old;
+  return __int_as_float(old);
 }
 
-// from min_max_observer_kernel.cu
 // get max and min per tensor
 // use block shared memory reduce
 template<typename T>
 __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max_ptr,
-                                     T* min_ptr) {
+                                     T* min_ptr, const int channel, const int HW) {
   // dyn shared memory
   extern __shared__ unsigned char shared_max_min_memory[];
   T* shared_max = reinterpret_cast<T*>(shared_max_min_memory);
@@ -97,19 +134,23 @@ __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max
   // follow the reduce v4
   int tid = threadIdx.x;
   int gid = blockDim.x * blockIdx.x + tid;
-  shared_max[tid] = FLT_MAX;
-  shared_min[tid] = FLT_MIN;
+  shared_max[tid] = FLT_MIN;
+  shared_min[tid] = FLT_MAX;
 
   for (int i = gid; i < nums; i += total_thread_num) {
-      shared_max[tid] = max(shared_max[tid], input_ptr[gid]);
-      shared_min[tid] = min(shared_min[tid], input_ptr[gid]);
+      shared_max[tid] = max(shared_max[tid], input_ptr[i]);
+      shared_min[tid] = min(shared_min[tid], input_ptr[i]);
+      //if(i <= 3){
+        //printf("shared max = %f\n", shared_max[tid]);
+        //printf("shared_min = %f\n", shared_min[tid]);
+      //}
   }
   __syncthreads();
-  
+  //gid = (blockDim.x * blockIdx.x) + tid;
   for (int s = blockDim.x / 2; s > 0; s >>= 1) {
     if (tid < s && gid < nums) {
       shared_max[tid] = max(shared_max[tid], shared_max[tid + s]);
-      shared_min[tid] = max(shared_min[tid], shared_min[tid + s]);
+      shared_min[tid] = min(shared_min[tid], shared_min[tid + s]);
     }
     __syncthreads();
   }
@@ -117,24 +158,26 @@ __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max
   if (tid == 0) {
       atomicMax(max_ptr, shared_max[0]);
       atomicMin(min_ptr, shared_min[0]);
+      //printf("max = %f\n", *max_ptr);
+      //printf("min = %f\n", *min_ptr);
   }
 }
 
 // get max and min per channel
 template<typename T>
 __global__ void ReduceMaxMinPerChannel(const T* input_ptr, const int nums,
-                                       const int num_channels, const int HW,
-                                       T* max_ptr, T* min_ptr) {
+                                       T* max_ptr, T* min_ptr, const int num_channels, const int HW) {
   extern __shared__ unsigned char shared_max_min_memory[];
   T* shared_max = reinterpret_cast<T*>(shared_max_min_memory);
   T* shared_min = shared_max + blockDim.x;
 
   int cur_channel = blockIdx.x;
   int tid = threadIdx.x;
-
+  int gid = blockIdx.x * blockDim.x + tid;
+  //int cur_channel = gid / HW;
   while (cur_channel < num_channels) {
-    shared_max[tid] = FLT_MAX;
-    shared_min[tid] = FLT_MIN;
+    shared_max[tid] = FLT_MIN;
+    shared_min[tid] = FLT_MAX;
 
     int index = (HW * cur_channel) + tid;
     int end = HW * (cur_channel + 1);
@@ -157,6 +200,10 @@ __global__ void ReduceMaxMinPerChannel(const T* input_ptr, const int nums,
     if (tid == 0) {
       atomicMax(&max_ptr[cur_channel], shared_max[0]);
       atomicMin(&min_ptr[cur_channel], shared_min[0]);
+      if(blockIdx.x==0){
+        printf("max = %f\n", max_ptr[0]);
+        printf("min = %f\n", min_ptr[0]);
+      }
     }
     cur_channel += gridDim.x;
   }
@@ -170,6 +217,7 @@ __global__ void GetScaleAndZPSymmetric(const T* max_ptr, const T* min_ptr,
   int gid = blockDim.x * blockIdx.x + tid;
   while (gid < nums) {
     T weight_max = max(fabs(max_ptr[gid]), fabs(min_ptr[gid]));
+    //if (gid==0) printf("weight_max_gpu is %f, fabs(max_ptr[gid]) is %f, fabs(min_ptr[gid]) is %f\n",weight_max,fabs(max_ptr[gid]),fabs(min_ptr[gid]));
     T denominator = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
     scale[gid] = weight_max / denominator;
     zero_point[gid] = 0;
@@ -193,9 +241,9 @@ __global__ void GetScaleAndZPAsymmetric(const T* max_ptr, const T* min_ptr, cons
 }
 
 template<typename T>
-__global__ void QuantizePerChannelSymmetric(const T* in_ptr, const T* scale_ptr, 
-                                  const int scale_size, const int nums, const int HW,
-                                  const double quantization_bit, T* out_ptr) {
+__global__ void QuantizePerChannelSymmetric(const T* in_ptr, const T* scale_ptr, const int nums,
+                                  const double quantization_bit, T* out_ptr,
+                                  const int scale_size, const int HW) {
   int gid = blockDim.x * blockIdx.x + threadIdx.x;
   int step = gridDim.x * blockDim.x;
 
@@ -242,20 +290,25 @@ __global__ void QuantizePerChannelAsymmetric(const T* in_ptr, const T* scale_ptr
     gid += step;
   }
 }
+//__forceinline__ __device__ void setround(){
+//    std::fesetround(FE_TONEAREST);
+//}
 
 template<typename T>
-__global__ void QuantizePerTensorSymmetric(const T* in_ptr, const T* scale_ptr, 
-                                  const int nums, const int HW, const double quantization_bit, T* out_ptr) {
+__global__ void QuantizePerTensorSymmetric(const T* in_ptr, const T* scale_ptr,
+                                  const int nums, const double quantization_bit, T* out_ptr, const int channel, const int HW) {
   int gid = blockDim.x * blockIdx.x + threadIdx.x;
   int step = gridDim.x * blockDim.x;
 
   T upper_bound = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
   T lower_bound = -upper_bound - 1;
-
+  T scale = *scale_ptr;
+  if (gid==0) printf("scaleGPU is %f\n", scale);
   while (gid < nums) {
-    T scale = *scale_ptr;
 
-    T out = std::nearbyint(in_ptr[gid] / scale);
+    T out = gpunearbyint(in_ptr[gid] / scale);
+    if (gid==328) printf("328 in_ptr is %f, out is %f\n", in_ptr[gid], out);
+    if (gid==1587) printf("1587 in_ptr is %f, out is %f\n", in_ptr[gid], out);
     out = out > upper_bound ? upper_bound : out;
     out = out < lower_bound ? lower_bound : out;
     out_ptr[gid] = out;
@@ -266,16 +319,16 @@ __global__ void QuantizePerTensorSymmetric(const T* in_ptr, const T* scale_ptr,
 
 template<typename T>
 __global__ void QuantizePerTensorAsymmetric(const T* in_ptr, const T* scale_ptr, const T* zero_point_ptr,
-                                   const int nums, const int HW, const double quantization_bit, T* out_ptr) {
+                                   const int nums, const int HW, const double quantization_bit, T* out_ptr,
+                                  const int channel, const int HW) {
   int gid = blockDim.x * blockIdx.x + threadIdx.x;
   int step = gridDim.x * blockDim.x;
 
   T upper_bound = static_cast<T>(pow(2.0, quantization_bit)) - 1;
   T lower_bound = 0;
-
+  T scale = *scale_ptr;
+  T zero_point = *zero_point_ptr;
   while (gid < nums) {
-    T scale = *scale_ptr;
-    T zero_point = *zero_point_ptr;
 
     T out = nearbyint(in_ptr[gid] / scale + zero_point);
     out = out > upper_bound ? upper_bound : out;
@@ -286,6 +339,21 @@ __global__ void QuantizePerTensorAsymmetric(const T* in_ptr, const T* scale_ptr,
   }
 }
 
+#define LAUNCH_GPU_KERNEL(GetMinMaxFunc, QuantFunc, scale_size, channel, HW) \
+    cudaMalloc((void **)&d_scale, scale_size * sizeof(float)); \
+    cudaMalloc((void **)&d_zeropoint, scale_size * sizeof(float)); \
+    cudaMalloc((void **)&d_max, scale_size * sizeof(float)); \
+    cudaMalloc((void **)&d_min, scale_size * sizeof(float)); \
+    cudaEvent_t start, stop; \
+    cudaEventCreate(&start); \
+    cudaEventCreate(&stop); \
+    cudaEventRecord(start); \
+    GetMinMaxFunc<float><<<gridSize, blockSize, blockSize * 2 * sizeof(float), 0>>>(d_input, nums, d_max, d_min, channel, HW);  \
+    GetScaleAndZPSymmetric<float><<<1, blockSize>>>(d_max, d_min, channel, quantization_bit, d_scale, d_zeropoint); \
+    QuantFunc<float><<<gridSize, blockSize>>>(d_input, d_scale, nums, quantization_bit, d_output, channel, HW); \
+    cudaEventRecord(stop); \
+    cudaEventSynchronize(stop); \
+    cudaEventElapsedTime(&milliseconds, start, stop);
 
 int main() {
   float milliseconds = 0;
@@ -294,10 +362,15 @@ int main() {
   constexpr int channel = 400;
   constexpr int quantization_bit = 8;
   float* input = (float*) malloc(sizeof(float) * nums);
+  float cpu_min = FLT_MAX;
+  float cpu_max = FLT_MIN;
   for(int i = 0; i < nums; i++) {
-    // generate float input inside [-1, 1]
-    input[i] = -1 + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/2));
+    // generate float input inside [-1, 1],[-3,3]
+    input[i] = -3 + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/6));
+    cpu_min = std::min(input[i], cpu_min);
+    cpu_max = std::max(input[i], cpu_max);
   }
+  //printf("per tensor min max cpu are  %f, %f\n", cpu_min, cpu_max);
   float* output = (float*) malloc(sizeof(float) * nums);
   float *d_input, *d_output;
   cudaMalloc((void **)&d_input, nums * sizeof(float));
@@ -309,50 +382,64 @@ int main() {
   int maxblocks = deviceProp.maxGridSize[0];
   int blockSize = 256;
   int gridSize = std::min<int>((nums + blockSize - 1) / blockSize,  std::min<int>(maxblocks, channel));
-
+  printf("gridsize blocksize are  %d, %d\n", gridSize, blockSize);
   float *d_scale, *d_zeropoint, *d_max, *d_min;
   // per tensor, scale and zp shape both are 1
   // switch to per tensor
-  bool per_tensor_quantize = true; 
+  bool per_tensor_quantize = false;
   if(per_tensor_quantize) {
-    cudaMalloc((void **)&d_scale, 1 * sizeof(float));
-    cudaMalloc((void **)&d_zeropoint, 1 * sizeof(float)); 
-    cudaMalloc((void **)&d_max, 1 * sizeof(float));
-    cudaMalloc((void **)&d_min, 1 * sizeof(float));  
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-    ReduceMaxMinPerTensor<float><<<gridSize, blockSize>>>(d_input, nums, d_max, d_min);
-    GetScaleAndZPSymmetric<float><<<gridSize, blockSize>>>(d_max, d_min, nums, quantization_bit, d_scale, d_zeropoint);
-    QuantizePerTensorSymmetric<float><<<gridSize, blockSize>>>(d_input, d_scale, nums, HW, quantization_bit, d_output);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
+    //cudaMalloc((void **)&d_scale, 1 * sizeof(float));
+    //cudaMalloc((void **)&d_zeropoint, 1 * sizeof(float));
+    //cudaMalloc((void **)&d_max, 1 * sizeof(float));
+    //cudaMalloc((void **)&d_min, 1 * sizeof(float));
+    //cudaEvent_t start, stop;
+    //cudaEventCreate(&start);
+    //cudaEventCreate(&stop);
+    //cudaEventRecord(start);
+    //ReduceMaxMinPerTensor<float><<<gridSize, blockSize, blockSize * 2 * sizeof(float), 0>>>(d_input, nums, d_max, d_min);
+    //GetScaleAndZPSymmetric<float><<<1, 1>>>(d_max, d_min, nums, quantization_bit, d_scale, d_zeropoint);//scale only shape 1
+    //QuantizePerTensorSymmetric<float><<<gridSize, blockSize>>>(d_input, d_scale, nums, quantization_bit, d_output);
+    //cudaEventRecord(stop);
+    //cudaEventSynchronize(stop);
+    //cudaEventElapsedTime(&milliseconds, start, stop);
+    LAUNCH_GPU_KERNEL(ReduceMaxMinPerTensor, QuantizePerTensorSymmetric, 1, nums, HW);
   } else {
   // perchannel, shape = channel
-    cudaMalloc((void **)&d_scale, channel * sizeof(float));
-    cudaMalloc((void **)&d_zeropoint, channel * sizeof(float)); 
-    cudaMalloc((void **)&d_max, channel * sizeof(float));
-    cudaMalloc((void **)&d_min, channel * sizeof(float)); 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-    ReduceMaxMinPerChannel<float><<<gridSize, blockSize>>>(d_input, nums, channel, HW, d_max, d_min);
-    GetScaleAndZPSymmetric<float><<<gridSize, blockSize>>>(d_max, d_min, nums, quantization_bit, d_scale, d_zeropoint);
-    QuantizePerChannelSymmetric<float><<<gridSize, blockSize>>>(d_input, d_scale, channel, nums, HW, quantization_bit, d_output);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
+    LAUNCH_GPU_KERNEL(ReduceMaxMinPerChannel, QuantizePerChannelSymmetric, channel, channel, HW);
+    //cudaMalloc((void **)&d_scale, channel * sizeof(float));
+    //cudaMalloc((void **)&d_zeropoint, channel * sizeof(float));
+    //cudaMalloc((void **)&d_max, channel * sizeof(float));
+    //cudaMalloc((void **)&d_min, channel * sizeof(float));
+    //cudaEvent_t start, stop;
+    //cudaEventCreate(&start);
+    //cudaEventCreate(&stop);
+    //cudaEventRecord(start);
+    //ReduceMaxMinPerChannel<float><<<gridSize, blockSize, blockSize * 2 * sizeof(float), 0>>>(d_input, nums, d_max, d_min, channel, HW);
+    //GetScaleAndZPSymmetric<float><<<1, blockSize>>>(d_max, d_min, channel, quantization_bit, d_scale, d_zeropoint);
+    //QuantizePerChannelSymmetric<float><<<gridSize, blockSize>>>(d_input, d_scale, nums, quantization_bit, d_output, channel, HW);
+    //cudaEventRecord(stop);
+    //cudaEventSynchronize(stop);
+    //cudaEventElapsedTime(&milliseconds, start, stop);
   }
-    cudaMemcpy(output, d_output, sizeof(float) * nums, cudaMemcpyDeviceToHost);
+
+  cudaMemcpy(output, d_output, sizeof(float) * nums, cudaMemcpyDeviceToHost);
   // (per tensor) get CPU output to validate GPU result is right or not
   float* CPUOutput= (float*) malloc(sizeof(float) * nums);
-  float* scale = (float*) malloc(sizeof(float) * 1);
-  float* zeropoint = (float*) malloc(sizeof(float) * 1);
-  GenScalePerTensorSymmetricCPU<float>(input, quantization_bit, nums, scale, zeropoint);
-  QuantizationPerTensorSymmetricCPU<float>(input, *scale, quantization_bit, nums, CPUOutput);
+  if(per_tensor_quantize) {
+    float* scale = (float*) malloc(sizeof(float) * 1);
+    float* zeropoint = (float*) malloc(sizeof(float) * 1);
+    GenScalePerTensorSymmetricCPU<float>(input, quantization_bit, nums, scale, zeropoint);
+    QuantizationPerTensorSymmetricCPU<float>(input, *scale, quantization_bit, nums, CPUOutput);
+    free(scale);
+    free(zeropoint);
+  } else {
+    float* scale = (float*) malloc(sizeof(float) * channel);
+    float* zeropoint = (float*) malloc(sizeof(float) * channel);
+    GenScalePerChannelSymmetricCPU<float>(input, quantization_bit, HW, channel, nums, scale, zeropoint);
+    QuantizationPerChannelSymmetricCPU<float>(input, scale, quantization_bit, HW, nums, CPUOutput);
+    free(scale);
+    free(zeropoint);
+  }
   if (CheckResult(output, CPUOutput, nums)) {
     printf("the ans is right");
   } else {
@@ -364,8 +451,6 @@ int main() {
   free(input);
   free(output);
   free(CPUOutput);
-  free(scale);
-  free(zeropoint);
   cudaFree(d_input);
   cudaFree(d_output);
   cudaFree(d_scale);
