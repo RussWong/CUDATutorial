@@ -43,13 +43,13 @@ int main(int argc, char** argv)
     {
         cudaStreamCreate(&stream));
     }
-
+    // each independent kernel running on each streams to parallize
     for (int i = 0; i < num_streams; ++i)
     {
         float_add_one_launcher(d_buffers[i], buffer_size, threads_per_block,
                              blocks_per_grid, streams[i]);
     }
-
+    // host wait each stream to sync
     for (auto& stream : streams)
     {
         cudaStreamSynchronize(stream));
