@@ -9,12 +9,15 @@
 // PerTensor + Sym: 0.58ms
 // PerChannel + Sym: 0.46ms
 // solved bugs:
-// 1. cpu_min != gpu_min, cpu_max != gpu_max, check minmax kernel and guess it resulted from atomicMax
-// 2. cpu_scale != gpu_scale, ep. cpu_scale = 0.22035, gpu_scale = 0.22036
-// 3. cpu_res != gpu_res , ep. cpu_res = 44, gpu_res = 45
+// 1. gpu_res[0] = 0, cpu_res[0] = 86
+//     cpu_max is right, gpu_max = very big
+// 2. cpu_min != gpu_min, cpu_max != gpu_max, check minmax kernel and guess it resulted from cuda kernel某些地方写错 or atomicMax
+// 3. cpu_scale != gpu_scale, ep. cpu_scale = 0.22035, gpu_scale = 0.22036
+// 4. cpu_res != gpu_res , ep. cpu_res = 44, gpu_res = 45
 // debug tips:
+// 1. input some simple case to confirm cpu impl is right
 // 1. printf cpu res and gpu res of each kernel
-// 2. use if(tid==0) to get the gpu output of one thread
+// 2. use if(tid==0) to get the gpu output and key variable of one thread
 // 3. use grid step loop to conveniently debug by launch one thread
 
 bool CheckResult(float *out, float* groudtruth, int nums){
