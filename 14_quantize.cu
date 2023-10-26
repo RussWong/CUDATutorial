@@ -128,6 +128,21 @@ __device__ float gpunearbyint(float a) {
 //    return(old);
 //}
 
+// Note: another version of float type atomicMax
+//inline __device__ float atomicMax(float *addr, float value) {
+//  float old = *addr, assumed;
+//  if (old >= value) return old;
+//  do {
+//    assumed = old;
+//    if (assumed > value) break;
+//    old = atomicCAS((unsigned int *)addr, __float_as_int(assumed),
+  //                  __float_as_int(value));
+
+//  } while (old != assumed);
+
+//  return old;
+//}
+
 inline __device__ float atomicMax(float *address, float val) {
   int* address_as_i = (int*)address;
   int old = *address_as_i;
