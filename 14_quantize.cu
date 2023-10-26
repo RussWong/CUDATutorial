@@ -257,6 +257,10 @@ __global__ void ReduceMaxMinPerChannel(const T* input_ptr, const int nums,
   }
 }
 
+// Note: performance will be low if use cpu function
+// why? min max ptr locate GPU memory ,not CPU memory.Because CPU funtion requests CPU memory data, so need
+// copy max min ptr from GPU memory to CPU memory, which will incur some overhead!
+// in addition, next kernel will run on GPU, at that time, scale and zeropoint will be copied from host to device,which will incur overhead, too
 template<typename T>
 __global__ void GetScaleAndZPSymmetric(const T* max_ptr, const T* min_ptr,
                                            const int nums, const double quantization_bit,
