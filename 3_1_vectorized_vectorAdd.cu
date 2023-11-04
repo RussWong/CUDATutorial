@@ -32,7 +32,7 @@ __global__ void mem_bw (float* A,  float* B, float* C){
 		//float4 a1 = LoadFromGlobalPTX(reinterpret_cast<float4*>(A) + i);
 		float4 b1 = reinterpret_cast<float4*>(B)[i];
 		//float4 b1 = LoadFromGlobalPTX(reinterpret_cast<float4*>(B) + i);
-		//float4 c1;
+		float4 c1;
     		// 测量显存带宽方法1:向量加法,248.8g/s
 		//c1.x = a1.x + b1.x;
 		//c1.y = a1.y + b1.y;
