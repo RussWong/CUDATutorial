@@ -1,7 +1,7 @@
 #include <bits/stdc++.h>
 #include <cuda.h>
 #include "cuda_runtime.h"
-//5.158ms
+//2.389ms
 template <int blockSize>
 __global__ void histgram(int *hist_data, int *bin_data, int N)
 {
@@ -16,12 +16,15 @@ __global__ void histgram(int *hist_data, int *bin_data, int N)
         atomicAdd(&cache[val], 1);
     }
     __syncthreads();//此刻每个block的bin都已统计在cache这个smem中
+    //debug info: if(tid== 0){printf("cache[1]=%d,hist[1]=%d\n",cache[1],hist_data[2]);}
     atomicAdd(&bin_data[tid], cache[tid]);
+    //debug info: if(tid== 0){printf("bin_data[1]=%d,hist[1]=%d\n",bin_data[1],hist_data[2]);}
 }
 
 bool CheckResult(int *out, int* groudtruth, int N){
     for (int i = 0; i < N; i++){
         if (out[i] != groudtruth[i]) {
+            printf("in checkres, out[i]=%d, gt[i]=%d\n", out[i], groudtruth[i]);
             return false;
         }
     }
@@ -60,19 +63,19 @@ int main(){
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
-    histgram<blockSize><<<Grid, Block>>>(hist_data, bin_data, 256);
+    histgram<blockSize><<<Grid, Block>>>(hist_data, bin_data, N);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
 
     cudaMemcpy(bin, bin_data, 256 * sizeof(int), cudaMemcpyDeviceToHost);
-    bool is_right = CheckResult(bin, groudtruth, N);
+    bool is_right = CheckResult(bin, groudtruth, 256);
     if(is_right) {
         printf("the ans is right\n");
     } else {
         printf("the ans is wrong\n");
         for(int i = 0; i < 256; i++){
-            printf("%lf ", bin[i]);
+            printf("%d ", bin[i]);
         }
         printf("\n");
     }
