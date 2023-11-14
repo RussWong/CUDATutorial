@@ -2,6 +2,7 @@
 #include <cuda.h>
 #include "cuda_runtime.h"
 //2.389ms
+//tips: L67和L74为遇见的两个bug，说明了在遍历的时候需要精确传入数据量，多了或少了都可能会出现垃圾值或者cuda干脆对这种情况不处理
 template <int blockSize>
 __global__ void histgram(int *hist_data, int *bin_data, int N)
 {
@@ -63,12 +64,14 @@ int main(){
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
+    // bug1: L68的N不能传错，之前传的256，导致L19的cache[1]打印出来为0
     histgram<blockSize><<<Grid, Block>>>(hist_data, bin_data, N);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
 
     cudaMemcpy(bin, bin_data, 256 * sizeof(int), cudaMemcpyDeviceToHost);
+    // bug2: 同bug1，L67传进去的256表示两个buffer的数据量，这个必须得精确，之前传的N，尽管只打印第1个值，但依然导致L27打印出来的值为垃圾值
     bool is_right = CheckResult(bin, groudtruth, 256);
     if(is_right) {
         printf("the ans is right\n");
