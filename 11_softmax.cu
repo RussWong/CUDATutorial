@@ -18,7 +18,7 @@ bool CheckResult(float *out, float* groudtruth, int N){
     return true;
 }
 
-float* softmaxCPU(float* input, float* result, int rows, int cols){
+void softmaxCPU(float* input, float* result, int rows, int cols){
   for (int j = 0; j < rows; j++)
   {
     float total = 0;
@@ -36,8 +36,6 @@ float* softmaxCPU(float* input, float* result, int rows, int cols){
       result[j * cols + i] = exp(input[j * cols + i] - MAX) / total;
     }
   }
-
-  return result;
 }
 template <typename T, int VecSize>
 struct alignas(sizeof(T) * VecSize) VectorType {
@@ -57,7 +55,6 @@ struct MaxOp {
 template<template<typename> class ReductionOp, typename T, int warp_width = WarpSize>
 __inline__ __device__ T WarpReduce(T val) {
   for (int mask = warp_width / 2; mask > 0; mask /= 2) {
-    // you can change L61 with __shfl_down_sync like 6_warp_level_reduce and see performance change
     val = ReductionOp<T>()(val, __shfl_xor_sync(0xffffffff, val, mask));
   }
   return val;
@@ -104,73 +101,79 @@ __device__ void store(float* dst, float* src, int row, const int row_size, const
   *(reinterpret_cast<VecType*>(dst) + offset) = *reinterpret_cast<VecType*>(src);
 }
 
-
+// 1, 1024/32,32, 1
 template<int pack_size, int cols_per_thread,
          int warp_width, int rows_per_thread>
 __global__ void WarpSoftmax(const float* src, float* dst, const int rows, const int cols) {
   constexpr int num_packs = cols_per_thread / pack_size;
   assert(cols <= cols_per_thread * warp_width);
   float buf[rows_per_thread][cols_per_thread];
+  //当前warp在所有warp中的id号，因为每行表示一个warp，所以只需求得列号，即global warp id
   const int global_warp_id = blockIdx.y * blockDim.y + threadIdx.y;
-  const int num_global_warp = gridDim.y * blockDim.y;
+  const int num_global_warp = gridDim.y * blockDim.y; // 125 * 8 = 1000, 与src.rows()匹配
   const int lane_id = threadIdx.x;
-  const int step = num_global_warp * rows_per_thread;
+  const int step = num_global_warp * rows_per_thread; // 1000
+  // 进入到当前所分配的整个block数量的数值处理范围
   for (int row = global_warp_id * rows_per_thread; row < rows; row += step) {
     float thread_max[rows_per_thread];
-
+    // 细粒度化，进入到每个线程所处理的行数范围
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       thread_max[row_id] = -Inf<float>();
       float* row_buf = buf[row_id];
-
+      // 再细粒度一点，进入到每个线程所处理的一行的多个向量范围
       for (int pack_id = 0; pack_id < num_packs; ++pack_id) {
+        // 每个向量的起始偏移
         const int pack_offset = pack_id * pack_size;
+        // 当前向量所在的起始列号
         const int col = (pack_id * warp_width + lane_id) * pack_size;
         if (col < cols) {
-          // load (row+row_id, col) data from src to reg row_buf
-          load<pack_size>(src, row_buf + pack_offset, row + row_id, rows, col);
-
+          // 根据起始列号，读取当前向量到row_buf寄存器
+          load<pack_size>(src, row_buf + pack_offset, row + row_id, cols, col);
+          // 求出pack  local和thread local的最大值
           for (int i = 0; i < pack_size; ++i) {
             thread_max[row_id] = max(thread_max[row_id], row_buf[pack_offset + i]);
           }
         } else {
-
+          // 起始列号超出了总列数，则设为负无穷，对softmax值无影响
           for (int i = 0; i < pack_size; ++i) { row_buf[pack_offset + i] = -Inf<float>(); }
         }
       }
     }
+    // 声明rows_per_thread个寄存器保存当前线程计算的行的最大值
     float warp_max[rows_per_thread];
-
+    // reduce各个线程计算的最大值，得出所有线程中的最大值，即一行的最大值
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       warp_max[row_id] = WarpReduce<MaxOp, float, warp_width>(thread_max[row_id]);
     }
+    // 声明rows_per_thread个寄存器保存当前线程计算的行的总和，即softmax分母
     float thread_sum[rows_per_thread];
 
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       thread_sum[row_id] = 0;
       float* row_buf = buf[row_id];
-
+      // 当前线程拥有的row_buf值的总和，softmax分母的partial value
       for (int i = 0; i < cols_per_thread; ++i) {
         row_buf[i] = Exp(row_buf[i] - warp_max[row_id]);
         thread_sum[row_id] += row_buf[i];
       }
     }
     float warp_sum[rows_per_thread];
-
+    // softmax分母的final value
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       warp_sum[row_id] = WarpReduce<SumOp, float, warp_width>(thread_sum[row_id]);
     }
 
     for (int row_id = 0; row_id < rows_per_thread; ++row_id) {
       float* row_buf = buf[row_id];
-
+      // 分子除分母得到sfotmax最终结果
       for (int i = 0; i < cols_per_thread; ++i) {
         row_buf[i] = Div(row_buf[i], warp_sum[row_id]);
       }
-
+      // 哪里来回哪里去，把最终结果写回显存
       for (int i = 0; i < num_packs; ++i) {
         const int col = (i * warp_width + lane_id) * pack_size;
         if (col < cols) {
-          store<pack_size>(dst, row_buf + i * pack_size, row + row_id, rows, col);
+          store<pack_size>(dst, row_buf + i * pack_size, row + row_id, cols, col);
         }
       }
     }
@@ -195,12 +198,12 @@ int main(){
         src[i] = 1;
     }
 
-    groudtruth = softmaxCPU(src, dst, 1000, 1024);
+    softmaxCPU(src, groudtruth, 1000, 1024);
 
     cudaMemcpy(d_src, src, N * sizeof(float), cudaMemcpyHostToDevice);
 
     dim3 Grid(1, 125);//y轴125个block,
-    dim3 Block(32, 8);//x轴32个threads组成一个warp访问一行,y轴8个threads,8*125=1000行,每个warp处理一行
+    dim3 Block(32, 8);//x轴32个threads组成一个warp访问一行,y轴8个threads,8*125=1000行
     
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
