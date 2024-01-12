@@ -70,12 +70,12 @@ __device__ int atomicAggInc(int *ctr) {
   int change = __popc(active);//warp mask中为1的数量
   int lane_mask_lt;
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lane_mask_lt));
-  unsigned int rank = __popc(active & lane_mask_lt);//比当前线程id小且值为1的mask之和
+  unsigned int rank = __popc(active & lane_mask_lt); // 比当前线程id小且值为1的mask之和
   int warp_res;
   if(rank == 0)//leader thread of every warp
     warp_res = atomicAdd(ctr, change);//compute global offset of warp
   warp_res = __shfl_sync(active, warp_res, leader);//broadcast to every thread
-  return warp_res + rank;
+  return warp_res + rank; // global offset + local offset = final offset，即L86表示的src[i]的最终的索引位置
 }
 
 __global__ void filter_warp_k(int *dst, int *nres, const int *src, int n) {

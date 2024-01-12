@@ -5,18 +5,22 @@
 
 template <typename T, int Size>
 struct alignas(sizeof(T) * Size) AlignedVector {
+  // 向量由size个类型为T的元素组成
   T val[Size];
+  // 向量支持[]访问
   __host__ __device__ inline const T& operator[](int i) const { return val[i]; }
   __host__ __device__ inline T& operator[](int i) { return val[i]; }
 };
 
 __device__ float TanhApprox(float x) {
+  // ptx指令，是CUDA的更底层的语言，类似于汇编对于C/C++
   //float r;
   //asm("tanh.approx.f32 %0,%1; \n\t" : "=f"(r) : "f"(x));
   //return r;
-  return tanhf(x);
+  return tanhf(x); // CUDA内置的math API
 }
 
+// gelu公式：x / 2 * (1 + tan(0.7978845608028654 * (x + 0.044714998453855515 * x^3))), 可上网自查
 template<typename T>
 struct GeluFunctor {
   static constexpr T alpha = static_cast<T>(0.7978845608028654);
@@ -34,6 +38,7 @@ struct GeluFunctor {
 
 template<>
 struct GeluFunctor<half> {
+  // 偷了个懒，直接把L26和L27拿过来用
   static constexpr float alpha = GeluFunctor<float>::alpha;
   static constexpr float beta = GeluFunctor<float>::beta;
   GeluFunctor<float> float_functor;
@@ -70,12 +75,16 @@ template <int VecSize>
 __global__ void FP16GeluCUDAKernel(const __half* x,
                                                  __half* y,
                                                  int n) {
+  // 向量化load & store
+  // 读取向量的offset
   int offset =
       static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x) * VecSize;
+  // 循环读取向量的stride
   int stride = static_cast<int>(blockDim.x * gridDim.x) * VecSize;
   GeluFunctor<half> gelu_fwd;
   __half y_reg[VecSize];
   for (; offset < n; offset += stride) {
+    // 先强转为向量，再传入offset读取对应数据
     using ArrT = AlignedVector<__half, VecSize>;
     const ArrT* in_arr = reinterpret_cast<const ArrT*>(x + offset);
     // ArrT* out_arr = reinterpret_cast<const ArrT*>(y + offset);
@@ -85,13 +94,15 @@ __global__ void FP16GeluCUDAKernel(const __half* x,
     if (VecSize == 1){
         y_reg[0] = gelu_fwd(in[0]);
     } else {
-      // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic.
+      // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic do vector computation.
       //for (int i = 0; i < VecSize; i+=2) {
       //gelu_fwd.apply2(y + offset, in[i]);
+      //标量计算
         for (int i = 0; i < VecSize; i++) {
             y_reg[i] = gelu_fwd(in[i]);
         }
     }
+    // 将计算结果写回显存
     *reinterpret_cast<ArrT*>(y + offset) = *reinterpret_cast<ArrT*>(y_reg);
   }
 }

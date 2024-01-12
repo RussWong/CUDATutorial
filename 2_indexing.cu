@@ -4,8 +4,11 @@
 
 __global__ void sum(float *x)
 {
+    // 泛指当前block在所有block范围内的id
     int block_id = blockIdx.x;
+    // 泛指当前线程在所有block范围内的全局id
     int global_tid = blockIdx.x * blockDim.x + threadIdx.x;
+    // 泛指当前线程在其block内的id
     int local_tid = threadIdx.x;
     printf("current block=%d, thread id in current block =%d, global thread id=%d\n", block_id, local_tid, global_tid);
     x[global_tid] += 1;

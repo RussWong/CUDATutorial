@@ -10,6 +10,7 @@
 __device__ __forceinline__
 float4 LoadFromGlobalPTX(float4 *ptr) {
     float4 ret;
+    // ptx指令，是CUDA的更底层的语言，类似于汇编对于C/C++
     asm volatile (
         "ld.global.v4.f32 {%0, %1, %2, %3}, [%4];"
         : "=f"(ret.x), "=f"(ret.y), "=f"(ret.z), "=f"(ret.w)
@@ -21,7 +22,7 @@ float4 LoadFromGlobalPTX(float4 *ptr) {
 
 //float4 vectoradd
 __global__ void mem_bw (float* A,  float* B, float* C){
-	// block and thread index
+    // 泛指当前线程在所有block范围内的全局id
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	// int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
 	for(int i = idx; i < MEMORY_OFFSET / 4; i += blockDim.x * gridDim.x) {

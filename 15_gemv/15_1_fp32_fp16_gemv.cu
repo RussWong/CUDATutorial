@@ -67,6 +67,8 @@ void gemv_kernel(T *vec,
     CHECK(cudaMemcpy(dst, d_dst, M * sizeof(T), cudaMemcpyDeviceToHost));
     T* groudtruth = (T*)malloc(sizeof(T) * M);
     // gemvCPU(mat, vec, groudtruth, M, N);
+    // 注意：此处没有验证fp16的cpu gemv，只是打印fp16 cuda kernel的结果肉眼看了一下
+    // 验证fp16的结果的做法是L75传入half类型的输入和模板类型，在L4 gemv cpu函数里面将输入类型强转为fp32即可，因为cpu没有half类型
     float* fp32_mat = reinterpret_cast<float*>(mat);
     float* fp32_vec = reinterpret_cast<float*>(vec);
     float* fp32_groudtruth = reinterpret_cast<float*>(groudtruth);

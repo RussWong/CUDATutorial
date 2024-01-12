@@ -75,8 +75,10 @@ __global__ void gemv(float* matrix, float* vector, float* res, int cols) {
 
     float thread_local_sum = 0.0f;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
+        // 强转为float4读取
         float4* mat4 = reinterpret_cast<float4*>(&matrix[bid * cols + tid * VEC_SIZE]); // 4 * half2
         float4* vec4 = reinterpret_cast<float4*>(&vector[tid * VEC_SIZE]);
+        // 但是对于float，只能标量相加，不支持向量相加
         thread_local_sum += mat4[i].x * vec4[i].x;
         thread_local_sum += mat4[i].y * vec4[i].y;
         thread_local_sum += mat4[i].z * vec4[i].z;
@@ -106,8 +108,10 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
     //float thread_local_sum = 0.0f;
     half thread_local_sum = 0;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
+        // 强转为float4读取，可以用half8替代
         float4* mat4 = reinterpret_cast<float4*>(&matrix[bid * cols + tid * VEC_SIZE]); // 4 * half2
         float4* vec4 = reinterpret_cast<float4*>(&vector[tid * VEC_SIZE]);
+        // 读取后强转为half2，以便L123及之后作向量化计算，与fp32不同的是，half支持向量化计算
         half2* vec_h1 = (half2*)&vec4[i].x;
         half2* vec_h2 = (half2*)&vec4[i].y;
         half2* vec_h3 = (half2*)&vec4[i].z;
@@ -140,9 +144,8 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
             // printf("res1.y = %f\n", res1.y);
         }
     }
-    //reduce to get the final val
+    // reduce to get the final val
     half reduce_res = blockReduce<SumOp, half>(thread_local_sum);
-    // float reduce_res = blockReduce<SumOp, float>(thread_local_sum);
     //store to gmem
     if(tid == 0) {
         printf("block reduce_res = %f\n", (float)reduce_res);
@@ -152,7 +155,8 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
     __syncthreads();
 }
 
-
+// 包装函数，以便分发到不同类型的实现
+// 之所以写成模板类，主要因为（CUDA kernel）函数不支持模板偏特化
 template<int VECS_PER_THREAD, int VEC_SIZE, int THREAD_NUMS>
 struct DispatchLauncher
 {

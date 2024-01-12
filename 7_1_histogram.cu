@@ -2,19 +2,20 @@
 #include <cuda.h>
 #include "cuda_runtime.h"
 //2.389ms
-//tips: L67和L74为遇见的两个bug，说明了在遍历的时候需要精确传入数据量，多了或少了都可能会出现垃圾值或者cuda干脆对这种情况不处理
+//tips: L68和L75为遇见的两个bug，说明了在遍历的时候需要精确传入数据量，多了或少了都可能会出现垃圾值或者cuda干脆对这种情况不处理
 template <int blockSize>
 __global__ void histgram(int *hist_data, int *bin_data, int N)
 {
     __shared__ int cache[256];
-    int gtid = blockIdx.x * blockSize + threadIdx.x;
-    int tid = threadIdx.x;
-    cache[tid] = 0;//每个thread初始化shared mem
+    int gtid = blockIdx.x * blockSize + threadIdx.x; // 泛指当前线程在所有block范围内的全局id
+    int tid = threadIdx.x; // 泛指当前线程在其block内的id
+    cache[tid] = 0; // 每个thread初始化shared mem
     __syncthreads();
+    // for循环来自动确定每个线程处理的元素个数
     for (int i = gtid; i < N; i += gridDim.x * blockSize)
     {
-        int val = hist_data[i];//每个单线程计算全局内存中的若干个值
-        atomicAdd(&cache[val], 1);
+        int val = hist_data[i];// 每个单线程计算全局内存中的若干个值
+        atomicAdd(&cache[val], 1); // 原子加法，强行使得并行的CUDA线程串行执行加法，但是并不能保证顺序
     }
     __syncthreads();//此刻每个block的bin都已统计在cache这个smem中
     //debug info: if(tid== 0){printf("cache[1]=%d,hist[1]=%d\n",cache[1],hist_data[2]);}

@@ -2,61 +2,32 @@
 #include <cuda.h>
 #include "cuda_runtime.h"
 
-#define THREAD_PER_BLOCK 256
-// latency: 0.656ms
-template <int blockSize>
-__device__ void BlockSharedMemReduce(float* smem) {
-  if (blockSize >= 1024) {
-    if (threadIdx.x < 512) {
-      smem[threadIdx.x] += smem[threadIdx.x + 512];
-    }
-    __syncthreads();
-  }
-  if (blockSize >= 512) {
-    if (threadIdx.x < 256) {
-      smem[threadIdx.x] += smem[threadIdx.x + 256];
-    }
-    __syncthreads();
-  }
-  if (blockSize >= 256) {
-    if (threadIdx.x < 128) {
-      smem[threadIdx.x] += smem[threadIdx.x + 128];
-    }
-    __syncthreads();
-  }
-  if (blockSize >= 128) {
-    if (threadIdx.x < 64) {
-      smem[threadIdx.x] += smem[threadIdx.x + 64];
-    }
-    __syncthreads();
-  }
-  // the final warp
-  if (threadIdx.x < 32) {
-    volatile float* vshm = smem;
-    if (blockDim.x >= 64) {
-      vshm[threadIdx.x] += vshm[threadIdx.x + 32];
-    }
-    vshm[threadIdx.x] += vshm[threadIdx.x + 16];
-    vshm[threadIdx.x] += vshm[threadIdx.x + 8];
-    vshm[threadIdx.x] += vshm[threadIdx.x + 4];
-    vshm[threadIdx.x] += vshm[threadIdx.x + 2]; 
-    vshm[threadIdx.x] += vshm[threadIdx.x + 1];
-  }
-}
-
-template <int blockSize>
-__global__ void reduce_v5(float *d_in, float *d_out){
-    __shared__ float smem[THREAD_PER_BLOCK];
-
+//v3: 让空闲线程也干活
+//latency: 1.147ms
+template<int blockSize>
+__global__ void reduce_v3(float *d_in, float *d_out){
+    __shared__ float smem[blockSize];
+    // 泛指当前线程在其block内的id
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
+    // 泛指当前线程在所有block范围内的全局id, *2代表当前block要处理2*blocksize的数据
+    // ep. blocksize = 2, blockIdx.x = 1, when tid = 0, gtid = 4, gtid + blockSize = 6; when tid = 1, gtid = 5, gtid + blockSize = 7
+    // ep. blocksize = 2, blockIdx.x = 0, when tid = 0, gtid = 0, gtid + blockSize = 2; when tid = 1, gtid = 1, gtid + blockSize = 3
+    // so, we can understand L18, one thread handle data located in tid and tid + blockSize 
+    unsigned int gtid = blockIdx.x * (blockSize * 2) + threadIdx.x;
     // load: 每个线程加载两个元素到shared mem对应位置
-    smem[tid] = d_in[i] + d_in[i + blockDim.x];
+    smem[tid] = d_in[gtid] + d_in[gtid + blockSize];
     __syncthreads();
-    // compute: reduce in shared mem
-    BlockSharedMemReduce<blockSize>(smem);
 
-    // store: write back to global mem
+    // 同v2：在不发生warp divergence的前提下，从之前的当前线程ID加2*线程ID位置然后不断加上*2位置上的数据，改成不断地对半相加，以消除bank conflict
+    // 此时一个block对d_in这块数据的reduce sum结果保存在id为0的线程上面
+    for (unsigned int index = blockDim.x / 2; index > 0; index >>= 1) {
+        if (tid < index) {
+            smem[tid] += smem[tid + index];
+        }
+        __syncthreads();
+    }
+
+    // store: 哪里来回哪里去，把reduce结果写回显存
     if (tid == 0) {
         d_out[blockIdx.x] = smem[0];
     }
@@ -75,7 +46,7 @@ bool CheckResult(float *out, float groudtruth, int n){
 
 int main(){
     float milliseconds = 0;
-    
+    //const int N = 32 * 1024 * 1024;
     const int N = 25600000;
     cudaSetDevice(0);
     cudaDeviceProp deviceProp;
@@ -106,25 +77,25 @@ int main(){
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
-    reduce_v5<blockSize / 2><<<Grid,Block>>>(d_a, d_out);
+    reduce_v3<blockSize / 2><<<Grid,Block>>>(d_a, d_out);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
 
     cudaMemcpy(out, d_out, GridSize * sizeof(float), cudaMemcpyDeviceToHost);
-    printf("allcated %d blocks, data counts are %d \n", GridSize, N);
+    printf("allcated %d blocks, data counts are %d", GridSize, N);
     bool is_right = CheckResult(out, groudtruth, GridSize);
     if(is_right) {
         printf("the ans is right\n");
     } else {
         printf("the ans is wrong\n");
-        for(int i = 0; i < GridSize;i++){
-            printf("resPerBlock : %lf ",out[i]);
-        }
-        printf("\n");
+        //for(int i = 0; i < GridSize;i++){
+            //printf("res per block : %lf ",out[i]);
+        //}
+        //printf("\n");
         printf("groudtruth is: %f \n", groudtruth);
     }
-    printf("reduce_v5 latency = %f ms\n", milliseconds);
+    printf("reduce_v3 latency = %f ms\n", milliseconds);
 
     cudaFree(d_a);
     cudaFree(d_out);

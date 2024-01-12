@@ -26,16 +26,19 @@ __global__ void reduce_warp_level(float *d_in,float *d_out, unsigned int n){
     unsigned int tid = threadIdx.x;
     unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
     unsigned int total_thread_num = blockSize * gridDim.x;
-
+    // 基于v5的改进：不用显式指定一个线程处理2个元素，而是通过L30的for循环来自动确定每个线程处理的元素个数
     for (int i = gtid; i < n; i += total_thread_num)
     {
-        sum += d_in[i];//thread local reduce，一个block/thread处理多个元素
+        sum += d_in[i];
     }
     
-    // partial sums for each warp
+    // 用于存储partial sums for each warp of a block
     __shared__ float WarpSums[blockSize / WarpSize]; 
+    // 当前线程在其所在warp内的ID
     const int laneId = tid % WarpSize;
+    // 当前线程所在warp在所有warp范围内的ID
     const int warpId = tid / WarpSize; 
+    // 对当前线程所在warp作warpshuffle操作，直接交换warp内线程间的寄存器数据
     sum = WarpShuffle<blockSize>(sum);
     if(laneId == 0) {
         WarpSums[warpId] = sum;
@@ -50,7 +53,7 @@ __global__ void reduce_warp_level(float *d_in,float *d_out, unsigned int n){
     if (warpId == 0) {
         sum = WarpShuffle<blockSize/WarpSize>(sum); 
     }
-    // write result for this block to global mem
+    // store: 哪里来回哪里去，把reduce结果写回显存
     if (tid == 0) {
         d_out[blockIdx.x] = sum;
     }

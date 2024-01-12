@@ -2,10 +2,11 @@
 #include <cuda.h>
 #include "cuda_runtime.h"
 
-// multi-block reduce two pass
+// v6: multi-block reduce final result by two pass
 // latency: 1.815ms
 template <int blockSize>
 __device__ void BlockSharedMemReduce(float* smem) {
+    //对v4 L45的for循环展开，以减去for循环中的加法指令，以及给编译器更多重排指令的空间
   if (blockSize >= 1024) {
     if (threadIdx.x < 512) {
       smem[threadIdx.x] += smem[threadIdx.x + 512];
@@ -47,13 +48,12 @@ __device__ void BlockSharedMemReduce(float* smem) {
 template <int blockSize>
 __global__ void reduce_v6(float *d_in, float *d_out, int nums){
     __shared__ float smem[blockSize];
-
+    // 泛指当前线程在其block内的id
     unsigned int tid = threadIdx.x;
+    // 泛指当前线程在所有block范围内的全局id
     unsigned int gtid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int total_thread_num = blockDim.x * gridDim.x;
-    // unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
-    // smem[tid] = d_in[i] + d_in[i + blockDim.x];
-    // load: 每个线程负责若干个元素的thread local求和，最后存到shared mem对应位置
+    // 基于v5的改进：不用显式指定一个线程处理2个元素，而是通过L58的for循环来自动确定每个线程处理的元素个数
     float sum = 0.0f;
     for (int32_t i = gtid; i < nums; i += total_thread_num) {
         sum += d_in[i];
@@ -63,7 +63,7 @@ __global__ void reduce_v6(float *d_in, float *d_out, int nums){
     // compute: reduce in shared mem
     BlockSharedMemReduce<blockSize>(smem);
 
-    // store: write back to global mem
+    // store: 哪里来回哪里去，把reduce结果写回显存
     if (tid == 0) {
         d_out[blockIdx.x] = smem[0];
     }
