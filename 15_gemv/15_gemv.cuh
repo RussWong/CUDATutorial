@@ -183,7 +183,7 @@ namespace gemv2 {
         half2 h3;
         half2 h4;
 
-        half8& operator = (half8 h8) {
+        __device__ half8& operator = (half8 h8) {
             h1 = h8.h1;
             h2 = h8.h2;
             h3 = h8.h3;
@@ -349,7 +349,7 @@ __global__ void gemv2_kernel(half* matrix, half* vector, half* res, int N, int M
         *reinterpret_cast<gemv2::half8*>(&res[mat_i]) = out;
     }
 }
-// TODO: 修改float4部分为可以泛化表示float4和half8类型的代码
+// TODO: 修改float4部分为可以泛化表示float4和half8类型的代码, 而后此模板函数可以取代以上fp32和fp16的gemv2
 template<int THREADS_PER_BLOCK, int THREADS_PER_VALUE, int VEC_SIZE, typename T>
 __global__ void gemv2_kernel_template(T* matrix, T* vector, T* res, int N, int M) {
     int tid = threadIdx.x;
@@ -388,11 +388,13 @@ struct DispatchLauncher2
         dim3 Grid(1);
         dim3 Block(THREADS_PER_BLOCK);
         float milliseconds = 0;
+        // 使用cudaevent计时，开销最小
         cudaEvent_t start, stop;
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
         cudaEventRecord(start);
         printf("calling\n");
+        // 启动cuda kernel
         gemv2_kernel<THREADS_PER_BLOCK, THREADS_PER_VALUE, VEC_SIZE><<<Grid, Block>>>(d_mat, d_vec, d_dst, N, M);
         cudaError_t result = cudaGetLastError();
         if (result) {
