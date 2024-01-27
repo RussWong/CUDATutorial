@@ -21,4 +21,4 @@ xxx is file name, yy is GPU compute capability, ep.A100's compute capability is 
 * add fp32/fp16 gemv(vec * mat,mat is col major)
 ### v2.2
 * add fp32/fp16 gemv(vec * mat,mat is row major)
-* add some code annotations(WIP)
+* add some code explaination(WIP)
