@@ -7,10 +7,11 @@
 //latency: 1.254ms
 template <int blockSize>
 __device__ float WarpShuffle(float sum) {
-    //__shfl_down_sync：前面的thread向后面的thread要数据
-    //__shfl_up_sync: 后面的thread向前面的thread要数据
-    //返回前面的thread向后面的thread要的数据，比如__shfl_down_sync(0xffffffff, sum, 16)那就是返回16号线程，17号线程的数据
-    //warp内的数据交换不会出现warp在shared memory上交换数据时的不一致现象，无需syncwarp
+    // __shfl_down_sync：前面的thread向后面的thread要数据
+    // __shfl_up_sync: 后面的thread向前面的thread要数据
+    // 1. 返回前面的thread向后面的thread要的数据，比如__shfl_down_sync(0xffffffff, sum, 16)那就是返回16号线程，17号线程的数据
+    // 2. 使用warp shuffle指令的数据交换不会出现warp在shared memory上交换数据时的不一致现象，这一点是由GPU driver完成，故无需任何sync, 比如syncwarp
+    // 3. 15-19行的5个if存在的必要性: block Size为人为指定，那么有可能位于以下5个if的区间，所以需要这些if根据实际分配的block size来过滤操作
     if (blockSize >= 32)sum += __shfl_down_sync(0xffffffff, sum, 16); // 0-16, 1-17, 2-18, etc.
     if (blockSize >= 16)sum += __shfl_down_sync(0xffffffff, sum, 8);// 0-8, 1-9, 2-10, etc.
     if (blockSize >= 8)sum += __shfl_down_sync(0xffffffff, sum, 4);// 0-4, 1-5, 2-6, etc.
@@ -25,6 +26,7 @@ __global__ void reduce_warp_level(float *d_in,float *d_out, unsigned int n){
 
     unsigned int tid = threadIdx.x;
     unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
+    // 分配的线程总数
     unsigned int total_thread_num = blockSize * gridDim.x;
     // 基于v5的改进：不用显式指定一个线程处理2个元素，而是通过L30的for循环来自动确定每个线程处理的元素个数
     for (int i = gtid; i < n; i += total_thread_num)

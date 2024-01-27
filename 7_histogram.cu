@@ -8,6 +8,7 @@ __global__ void histgram(int *hist_data, int *bin_data)
     /*error*/
     // bin_data[hist_data[gtid]]++;
     /*right*/
+    // 原子加法，将所有并行线程强制转为串行，但不保证顺序
     atomicAdd(&bin_data[hist_data[gtid]], 1);
 }
 

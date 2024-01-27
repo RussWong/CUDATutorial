@@ -5,6 +5,7 @@
 
 int main() {
   int deviceCount = 0;
+  // 获取当前机器的GPU数量
   cudaError_t error_id = cudaGetDeviceCount(&deviceCount);
   if (deviceCount == 0) {
     printf("There are no available device(s) that support CUDA\n");
@@ -13,6 +14,7 @@ int main() {
   }
   for (int dev = 0; dev < deviceCount; ++dev) {
     cudaSetDevice(dev);
+    // 初始化当前device的属性获取对象
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, dev);
 
@@ -26,11 +28,11 @@ int main() {
     printf( "  GPU Max Clock rate:                            %.0f MHz (%0.2f "
         "GHz)\n",
         deviceProp.clockRate * 1e-3f, deviceProp.clockRate * 1e-6f);
-    //if (deviceProp.l2CacheSize) {
+    // L2 cache大小
     printf("  L2 Cache Size:                                 %d bytes\n",
              deviceProp.l2CacheSize);
-    //}
     // high-frequent used
+    // 注释见每个printf内的字符串
     printf("  Total amount of shared memory per block:       %zu bytes\n",
            deviceProp.sharedMemPerBlock);
     printf("  Total shared memory per multiprocessor:        %zu bytes\n",

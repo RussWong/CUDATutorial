@@ -3,8 +3,8 @@
 #include "cuda_runtime.h"
 #include "cooperative_groups.h"
 //#define THREAD_PER_BLOCK 256
-//估计这种warp和shared在老的gpu上面会很有成效，但是在turing后的GPU，nvcc编译器优化了很多
-//cpu
+// 这种warp和shared在老的gpu上面会很有成效，但是在turing后的GPU，nvcc编译器优化了很多，所以导致效果不明显
+// cpu
 int filter(int *dst, int *src, int n) {
   int nres = 0;
   for (int i = 0; i < n; i++)
@@ -13,55 +13,58 @@ int filter(int *dst, int *src, int n) {
   // return the number of elements copied
   return nres;
 }
-//数据量为256000000时，latency=14.37ms
-//cuda naive kernel
+// 数据量为256000000时，latency=14.37ms
+// naive kernel
 //__global__ void filter_k(int *dst, int *nres, int *src, int n) {
 //  int i = threadIdx.x + blockIdx.x * blockDim.x;
+//  // 输入数据大于0的，计数器+1，并把该数写到输出显存以计数器值为索引的地址
 //  if(i < n && src[i] > 0)
 //    dst[atomicAdd(nres, 1)] = src[i];
 //}
-//数据量为256000000时，latency=13.86ms
-// //block level, use block level atomics based on shared memory
+
+// 数据量为256000000时，latency=13.86ms
+// block level, use block level atomics based on shared memory
 // __global__ 
 // void filter_shared_k(int *dst, int *nres, const int* src, int n) {
+//   // 计数器声明为shared memory，因为这是所有线程都会访问的
 //   __shared__ int l_n;
 //   int gtid = blockIdx.x * blockDim.x + threadIdx.x;
 //   int total_thread_num = blockDim.x * gridDim.x;
 
 //   for (int i = gtid; i < n; i += total_thread_num) {
 //     // use first thread to zero the counter
+//     // 初始化只需1个线程来操作
 //     if (threadIdx.x == 0)
 //       l_n = 0;
 //     __syncthreads();
 
-//     // 每个block内部，大于0的数量(l_n)和每个大于0的thread offset(pos)
+//     // 每个block内部，大于0的数量(l_n)和每个大于0的thread offset(pos)，比如1 2 4号线程都大于0，那么对于4号线程来说它的pos = 3
 //     int d, pos;
 
-//     if(i < n) {
-//       d = src[i];
-//       if(d > 0)
+//     if(i < n && src[i] > 0) {
 //         //pos: src[thread]>0的thread在当前block的index
 //         pos = atomicAdd(&l_n, 1);
 //     }
 //     __syncthreads();
 
-//     //每个block选出tid=0作为leader
-//     //leader把每个block的大于0的数量l_n累加到 the global counter(nres)
+//     // 每个block选出tid=0作为leader
+//     //l eader把每个block的大于0的数量l_n累加到全局计数器(nres),即所有block的局部计数器做一个 reduce聚合
 //     if(threadIdx.x == 0)
 //       l_n = atomicAdd(nres, l_n);
 //     __syncthreads();
 
 //     //write & store
 //     if(i < n && d > 0) {
-//     //pos: src[thread]>0的thread在当前block的index
-//     //l_n: 在当前block的前面几个block的所有src>0的个数
-//     //pos + l_n：当前thread的全局offset
+//     // 1. pos: src[thread]>0的thread在当前block的index
+//     // 2. l_n: 在当前block的前面几个block的所有src>0的个数
+//     // 3. pos + l_n：当前thread的全局offset
 //       pos += l_n; 
 //       dst[pos] = d;
 //     }
 //     __syncthreads();
 //   }
 // }
+
 //数据量为256000000时，latency=13.79ms
 //warp level, use warp-aggregated atomics
 __device__ int atomicAggInc(int *ctr) {
@@ -83,15 +86,14 @@ __global__ void filter_warp_k(int *dst, int *nres, const int *src, int n) {
   if(i >= n)
     return;
   if(src[i] > 0)
+    // 以上L70只是计算当前thread负责数据的全局offset
     dst[atomicAggInc(nres)] = src[i];
 }
 
 bool CheckResult(int *out, int groudtruth, int n){
-    //for (int i = 0; i < n; i++){
     if (*out != groudtruth) {
         return false;
     }
-    //}
     return true;
 }
 

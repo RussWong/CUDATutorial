@@ -87,14 +87,12 @@ __global__ void FP16GeluCUDAKernel(const __half* x,
     // 先强转为向量，再传入offset读取对应数据
     using ArrT = AlignedVector<__half, VecSize>;
     const ArrT* in_arr = reinterpret_cast<const ArrT*>(x + offset);
-    // ArrT* out_arr = reinterpret_cast<const ArrT*>(y + offset);
     const __half* in = reinterpret_cast<const __half*>(in_arr);
-    // __half* out = reinterpret_cast<const __half*>(out_arr);
 
     if (VecSize == 1){
         y_reg[0] = gelu_fwd(in[0]);
     } else {
-      // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic do vector computation.
+      // Note: when you have ampere GPU, you can enable the "apply2" method replacing L99-L101 to get performance improvement by half2 intrinsic do vector computation.
       //for (int i = 0; i < VecSize; i+=2) {
       //gelu_fwd.apply2(y + offset, in[i]);
       //标量计算

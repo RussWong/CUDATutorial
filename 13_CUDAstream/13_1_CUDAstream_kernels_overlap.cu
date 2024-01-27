@@ -38,7 +38,7 @@ int main(int argc, char** argv)
     {
         cudaMalloc(&d_buffer, buffer_size * sizeof(float));
     }
-
+    // 创建num streams个stream
     for (auto& stream : streams)
     {
         cudaStreamCreate(&stream);
@@ -49,7 +49,7 @@ int main(int argc, char** argv)
         float_add_one_launcher(d_buffers[i], buffer_size, threads_per_block,
                              blocks_per_grid, streams[i]);
     }
-    // host wait each stream to sync
+    // host wait each stream of device
     for (auto& stream : streams)
     {
         cudaStreamSynchronize(stream);
@@ -59,7 +59,7 @@ int main(int argc, char** argv)
     {
         cudaFree(d_buffer);
     }
-
+    // 销毁cuda stream
     for (auto& stream : streams)
     {
         cudaStreamDestroy(stream);

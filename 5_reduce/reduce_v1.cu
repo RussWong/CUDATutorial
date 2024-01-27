@@ -14,6 +14,7 @@ __global__ void reduce_v1(float *d_in,float *d_out){
     unsigned int gtid = blockIdx.x * blockSize + threadIdx.x;
     // load: 每个线程加载一个元素到shared mem对应位置
     smem[tid] = d_in[gtid];
+    // 每对shared memory做读写操作都需要加__syncthreads保证一个block内的threads此刻都同步，以防结果错误
     __syncthreads();
 
     // 基于v0作出改进：使得一个warp内的线程不会被L23所分化，即部分执行部分等待

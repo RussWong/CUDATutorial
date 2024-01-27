@@ -33,7 +33,7 @@ template<>
 struct Vec<half> {
     static constexpr int size = 8;
 };
-//__hadd可以作为fp16的加法，不确定可不可以用在这里
+
 template<typename T>
 struct SumOp {
   __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
@@ -51,18 +51,22 @@ __device__ __forceinline__ T warpReduce(T val){
     }
     return val;
 }
+// 把block reduce拆分为多个warp reduce来计算
 template<template<typename> class ReductionOp, typename T>
 __device__ __forceinline__ T blockReduce(T val){
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
+    // 向上进1，以防分配的线程数量小于32导致warp nums为0
     int warp_nums = (blockDim.x + 31) / 32;
     static __shared__ float warpres[64];
+    // block内每个warp reduce的结果，该结果保存在每个warp内的0号线程，所以L65用0号线程写入warp res
     val = warpReduce<ReductionOp, T>(val);
     if (lane_id == 0){
         warpres[warp_id] = val;
     }
     __syncthreads();
+    // 最后把每个warp的结果再作一个reduce得到最终一个block的结果
     float warp_val = tid < warp_nums ? warpres[tid] : 0;
     return warpReduce<ReductionOp, T>(warp_val);
 }
@@ -176,6 +180,7 @@ struct DispatchLauncher
 // vec * mat, mat is row major
 // [1, N] * [N, M]
 // logits * v
+// 有关fp32/fp16 fma和add的各种重载操作
 namespace gemv2 {
     struct half8 {
         half2 h1;

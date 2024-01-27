@@ -17,7 +17,8 @@ bool CheckResult(float *out, float* groudtruth, int N){
     }
     return true;
 }
-
+// softmax公式
+// e^(xi - max(xi)) / sigma(e^(xi - max(xi)))
 void softmaxCPU(float* input, float* result, int rows, int cols){
   for (int j = 0; j < rows; j++)
   {
@@ -37,16 +38,18 @@ void softmaxCPU(float* input, float* result, int rows, int cols){
     }
   }
 }
+// 定义向量类型，该向量长度为VecSize
+// 例: 对于float，向量类型为VectorType<float, 4>
 template <typename T, int VecSize>
 struct alignas(sizeof(T) * VecSize) VectorType {
   T val[VecSize];
 };
-
+// 加法操作的模板callable functor
 template<typename T>
 struct SumOp {
   __device__ __forceinline__ T operator()(const T& a, const T& b) const { return a + b; }
 };
-
+// 求最大值操作的模板callable functor
 template<typename T>
 struct MaxOp {
   __device__ __forceinline__ T operator()(const T& a, const T& b) const { return max(a, b); }
@@ -62,7 +65,7 @@ __inline__ __device__ T WarpReduce(T val) {
 
 template<typename T>
 __inline__ __device__ T Exp(T x);
-
+// 特例化exp fp32
 template<>
 __inline__ __device__ float Exp<float>(float x) {
   //return __expf(x);//fast math
@@ -86,6 +89,7 @@ __inline__ __device__ float Div<float>(float a, float b) {
   return a / b;
 }
 
+// 抽象出加载数据的操作，从src向量化加载第row行第col列的数据到dst
 template<int VecSize>
 __device__ void load(const float* src, float* dst, int row, const int row_size, const int col) {
   using VecType = VectorType<float, VecSize>;
@@ -93,7 +97,7 @@ __device__ void load(const float* src, float* dst, int row, const int row_size, 
   *reinterpret_cast<VecType*>(dst) = *(reinterpret_cast<VecType*>(const_cast<float*>(src)) + offset);
 }
 
-
+// 抽象出保存数据的操作，从src向量化写第row行第col列的数据到dst
 template<int VecSize>
 __device__ void store(float* dst, float* src, int row, const int row_size, const int col) {
   using VecType = VectorType<float, VecSize>;
