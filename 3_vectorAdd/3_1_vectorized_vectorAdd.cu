@@ -26,7 +26,7 @@ __global__ void mem_bw (float* A,  float* B, float* C){
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	// int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
 	for(int i = idx; i < MEMORY_OFFSET / 4; i += blockDim.x * gridDim.x) {
-		//问题1: 删除34-46行,会发现带宽数据为2666g/S
+		//问题1: 删除43-46行,会发现带宽数据为2666g/S
 		//尝试: 使用nv ptx load global memory指令,结果数据依然没变
 		//结论: 大概率是编译器优化:读了数据不做操作那就会不读
 		float4 a1 = reinterpret_cast<float4*>(A)[i];
@@ -107,7 +107,7 @@ int main(){
 	}
 	printf("Result right\n");
 	unsigned N = ARRAY_SIZE * 4;
-	/* 测量显存带宽时, 根据实际读写的数组个数, 指定110行是1/2/3 */
+	/* 测量显存带宽时, 根据实际读写的数组个数, 指定下行是1/2/3 */
 	printf("Mem BW= %f (GB/sec)\n", 3 * (float)N / milliseconds / 1e6);
   	cudaFree(A_g);
   	cudaFree(B_g);
