@@ -74,7 +74,8 @@ int main()
     }
     for(int i = 0; i < nstreams; i++){
         printf("%d th stream is working \n", i);
-        int start_per_stream = i * size_per_stream;
+        // bug: size_per_stream-->nums_per_stream, 指针偏移应该加上偏移数量而不是大小
+        int start_per_stream = i * nums_per_stream;
         printf("size_per_steram=%d, start_per_stream=%d\n",size_per_stream,start_per_stream);
         /* async copy data to GPU */
         cudaMemcpyAsync(dx + start_per_stream, hx + start_per_stream, 
