@@ -369,7 +369,7 @@ __global__ void QuantizePerTensorSymmetric(const T* in_ptr, const T* scale_ptr,
 
 template<typename T>
 __global__ void QuantizePerTensorAsymmetric(const T* in_ptr, const T* scale_ptr, const T* zero_point_ptr,
-                                   const int nums, const int HW, const double quantization_bit, T* out_ptr,
+                                   const int nums, const double quantization_bit, T* out_ptr,
                                   const int channel, const int HW) {
   int gid = blockDim.x * blockIdx.x + threadIdx.x;
   int step = gridDim.x * blockDim.x;
