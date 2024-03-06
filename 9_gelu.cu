@@ -64,8 +64,8 @@ struct GeluFunctor<half> {
     //float2 tanh_out;
     //tanh_out.x = TanhApprox(tanh_in.x);
     //tanh_out.y = TanhApprox(tanh_in.y);
-    //const half2 y2 = __hmul2(__hmul2(__hmul2(__float2half2_rn(0.5F), x2),
-    //                                 __hadd2(__float2half2_rn(1.0F), __float22half2_rn(tanh_out))));
+    //const half2 y2 = __hmul2(__hmul2(__float2half2_rn(0.5F), x2),
+    //                                 __hadd2(__float2half2_rn(1.0F), __float22half2_rn(tanh_out)));
     //*reinterpret_cast<half2*>(y) = y2;
   //}
 };
