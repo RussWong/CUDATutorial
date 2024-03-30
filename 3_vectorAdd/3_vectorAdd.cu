@@ -85,7 +85,6 @@ int main()
         }
     }
     printf("Result right\n");
-    printf("Mem BW= %f (GB/sec)\n", (float)N*4/milliseconds/1e6);///1.78gb/s
     cudaFree(dx);
     cudaFree(dy);
     cudaFree(dz);
