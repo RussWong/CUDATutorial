@@ -80,7 +80,7 @@ __global__ void gemv(float* matrix, float* vector, float* res, int cols) {
 
     float thread_local_sum = 0.0f;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
-        float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VECS_SIZE) + i * blockDim.x + tid]; // 1 * float4
+        float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VEC_SIZE) + i * blockDim.x + tid]; // 1 * float4
         float4 vec4 = reinterpret_cast<float4*>(vector)[i * blockDim.x + tid];
         thread_local_sum += mat4.x * vec4.x;
         thread_local_sum += mat4.y * vec4.y;
@@ -104,7 +104,7 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
     //float thread_local_sum = 0.0f;
     half thread_local_sum = 0;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
-        float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VECS_SIZE) + i * blockDim.x + tid]; // 4 * half2
+        float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VEC_SIZE) + i * blockDim.x + tid]; // 4 * half2
         float4 vec4 = reinterpret_cast<float4*>(vector)[i * blockDim.x + tid];
         half2* vec_h1 = (half2*)&vec4.x;
         half2* vec_h2 = (half2*)&vec4.y;
