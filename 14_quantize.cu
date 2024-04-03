@@ -31,9 +31,9 @@ bool CheckResult(float *out, float* groudtruth, int nums){
 }
 // CPU version equation
 // PerTensor + Sym: scale = max(abs(weight)) / 127 , zeropoint = 0, input_int8 = clamp(input_fp32/scale ,-128, 127)
-// PerTensor + Asym: scale = (max(weight) - min(weight)) / 127, zeropoint = -round(min(weight))/scale
+// PerTensor + Asym: scale = (max(weight) - min(weight)) / 255, zeropoint = -round(min(weight))/scale
 // PerChannel + Sym: scale[channel_id] = max(abs(weight[channel_id])) / 127 , zeropoint = 0, input_int8[channel_id * HW + (channel_id + 1) * HW] = clamp(input_fp32[channel_id * HW + (channel_id + 1) * HW]/scale[channel_id] ,-128, 127)
-// PerChannel + Asym: scale[channel_id] = (max(weight[channel_id]) - min(weight[channel_id])) / 127, zeropoint[channel_id] = -round(min(weight[channel_id]))/scale[channel_id]
+// PerChannel + Asym: scale[channel_id] = (max(weight[channel_id]) - min(weight[channel_id])) / 255, zeropoint[channel_id] = -round(min(weight[channel_id]))/scale[channel_id]
 
 // py code
 // def gen_quant_scale_for_min_max_symmetric(weight, quantization_bit):
