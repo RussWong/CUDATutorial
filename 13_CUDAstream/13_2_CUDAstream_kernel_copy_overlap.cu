@@ -84,7 +84,7 @@ int main()
                     size_per_stream, cudaMemcpyHostToDevice, streams[i]);
 
         /* launch GPU kernel */
-        vec_add<<<grid, bs, 0, streams[i]>>>(dx + start_per_stream, dy + start_per_stream, dz + start_per_stream, size_per_stream); 
+        vec_add<<<grid, bs, 0, streams[i]>>>(dx + start_per_stream, dy + start_per_stream, dz + start_per_stream, nums_per_stream); 
         
         /* async copy GPU result to CPU */
         cudaMemcpyAsync(hz + start_per_stream, dz + start_per_stream, size_per_stream, cudaMemcpyDeviceToHost, streams[i]);
