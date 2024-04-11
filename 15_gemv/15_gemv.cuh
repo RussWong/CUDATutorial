@@ -80,16 +80,19 @@ __global__ void gemv(float* matrix, float* vector, float* res, int cols) {
 
     float thread_local_sum = 0.0f;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
+        // 向量化读取matrix和vector，因为是先转成float4指针再读取，所以注意matrix读取的时候，列数需要除以VEC_SIZE
         float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VEC_SIZE) + i * blockDim.x + tid]; // 1 * float4
         float4 vec4 = reinterpret_cast<float4*>(vector)[i * blockDim.x + tid];
+        // 向量乘法并累加向量内的4个结果，得到该向量内部的乘加结果
         thread_local_sum += mat4.x * vec4.x;
         thread_local_sum += mat4.y * vec4.y;
         thread_local_sum += mat4.z * vec4.z;
         thread_local_sum += mat4.w * vec4.w;
     }
-    //reduce to get the final val
+    // reduce to get the final val
+    // 以上仅得到了每个向量的内部乘加结果，故还需要reduce得到matrix的一行乘加vector的最终结果
     float reduce_res = blockReduce<SumOp, float>(thread_local_sum);
-    //store to gmem
+    // store to gmem
     if(tid == 0) {
         res[blockIdx.x] = reduce_res;
     }
@@ -106,6 +109,9 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
     for(int i = 0; i < VECS_PER_THREAD; i++) {
         float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VEC_SIZE) + i * blockDim.x + tid]; // 4 * half2
         float4 vec4 = reinterpret_cast<float4*>(vector)[i * blockDim.x + tid];
+        // 与fp32的gemv不同点在于，向量宽度由4变为8，满足128bit的CUDA线程最大读写宽度
+        // 所以依然可以用float4表示读取的偏移宽度，half也OK，只是CUDA没有half8这个内置类型，需要自定义half8这个struct，见下文190行左右
+        // 然后再转成half2，调用half2 intrinsic做计算
         half2* vec_h1 = (half2*)&vec4.x;
         half2* vec_h2 = (half2*)&vec4.y;
         half2* vec_h3 = (half2*)&vec4.z;
@@ -138,6 +144,7 @@ __global__ void gemv(half* matrix, half* vector, half* res, int cols) {
         //}
     }
     //reduce to get the final val
+    // 以上仅得到了每个向量的内部乘加结果，故还需要reduce得到matrix的一行乘加vector的最终结果
     half reduce_res = blockReduce<SumOp, half>(thread_local_sum);
     //store to gmem
     if(tid == 0) {
@@ -240,7 +247,8 @@ namespace gemv2 {
 
     inline __device__ half fma(half a, half b, half c)
     {
-        // 有时候编译器会不认识__hmul或者__hadd，所以粗暴转成fp32计算再转回fp16
+        // 有的编译器会不认识half intrinsic 例如__hmul或者__hadd，这很奇怪
+        // 所以粗暴转成fp32计算再转回fp16
         return __float2half((float)a * (float)b + (float)c);
     }
 
