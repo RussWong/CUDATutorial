@@ -20,6 +20,10 @@ __global__ void reduce_v0(float *d_in,float *d_out){
     // 每个线程在shared memory上跨index加另一个元素，直到跨度>线程数量
     // 此时一个block对d_in这块数据的reduce sum结果保存在id为0的线程上面
     for(int index = 1; index < blockDim.x; index *= 2) {
+        // 注意！v0并没有warp divergence，因为没有else分支，视频目前这里讲错
+        // 现在的v0和v1性能大体相似
+        // v0慢的原因在于下一行使用了除余%，除余%是个非常耗时的指令，我会在下个版本对这里进一步修正
+        // 可尝试把下一行替换为`if ((tid & (2 * index - 1)) == 0) {`, 性能大概可以提升30%～50%
         if (tid % (2 * index) == 0) {
             smem[tid] += smem[tid + index];
         }
