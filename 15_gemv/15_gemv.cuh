@@ -80,6 +80,7 @@ __global__ void gemv(float* matrix, float* vector, float* res, int cols) {
 
     float thread_local_sum = 0.0f;
     for(int i = 0; i < VECS_PER_THREAD; i++) {
+        // 注意: 此处读取mat4的代码和视频上不同，视频上错以为是先加offset再强转为float4指针
         // 向量化读取matrix和vector，因为是先转成float4指针再读取，所以注意matrix读取的时候，列数需要除以VEC_SIZE
         float4 mat4 = reinterpret_cast<float4*>(matrix)[bid * (cols / VEC_SIZE) + i * blockDim.x + tid]; // 1 * float4
         float4 vec4 = reinterpret_cast<float4*>(vector)[i * blockDim.x + tid];
