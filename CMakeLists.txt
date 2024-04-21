@@ -172,6 +172,22 @@ target_link_libraries(
     9_gelu PUBLIC
     -lcudart
     -lcudadevrt)
+#10 fp32
+add_executable(10_fp32
+    10_fused_bias_mask_scale_and_add/10_fused_bias_mask_scale_and_add_fp32.cu
+)
+target_link_libraries(
+    10_fp32 PUBLIC
+    -lcudart
+    -lcudadevrt)
+#10 fp16
+add_executable(10_fp16
+    10_fused_bias_mask_scale_and_add/10_fused_bias_mask_scale_and_add_fp16.cu
+)
+target_link_libraries(
+    10_fp16 PUBLIC
+    -lcudart
+    -lcudadevrt)
 #11
 add_executable(11_softmax
     11_softmax.cu

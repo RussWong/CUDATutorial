@@ -25,11 +25,11 @@ __global__ void FusedBiasAddCUDAKernelFloat(FUNCTOR functor, const int elem_cnt,
 }
 
 int main(){
-    int ele_cnt = 1000;
+    constexpr int ele_cnt = 1000;
     float scale = 0.5;
-    uint8_t* mask_tensor = new uint8_t[1000];
-    float* add_val = new float[1000];
-    for (int i = 0; i < 1000; i++){
+    uint8_t* mask_tensor = new uint8_t[ele_cnt];
+    float* add_val = new float[ele_cnt];
+    for (int i = 0; i < ele_cnt; i++){
         mask_tensor[i] = (uint8_t)(i);
         add_val[i] = (float)(i);
     }
@@ -48,7 +48,12 @@ int main(){
     cudaMemcpy(d_x, x, sizeof(float) * ele_cnt, cudaMemcpyHostToDevice);
     cudaMemcpy(d_y, y, sizeof(float) * ele_cnt, cudaMemcpyHostToDevice);
     cudaMemcpy(d_bias, bias, sizeof(float) * bias_size, cudaMemcpyHostToDevice);
-
+    uint8_t *d_mask_tensor;
+    float *d_add_val;
+    cudaMalloc((void **)&d_mask_tensor, ele_cnt * sizeof(uint8_t));
+    cudaMalloc((void **)&d_add_val, ele_cnt * sizeof(float));
+    cudaMemcpy(d_mask_tensor, mask_tensor, sizeof(float) * ele_cnt, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_add_val, add_val, sizeof(float) * ele_cnt, cudaMemcpyHostToDevice);
 
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, 0);
@@ -58,7 +63,7 @@ int main(){
     MaskScaleAndElementwiseAddFunctor<float> mask_scale_and_elementwise_add_func(mask_tensor, add_val, scale);
     FusedBiasAddCUDAKernelFloat<<<gridSize , blockSize>>>(mask_scale_and_elementwise_add_func, ele_cnt, bias_size, d_x, d_bias, d_y);
     cudaMemcpy(y, d_y, sizeof(float) * ele_cnt, cudaMemcpyDeviceToHost);
-    printf("pass");
+
     free(x);
     free(y);
     free(bias);
@@ -69,4 +74,6 @@ int main(){
     cudaFree(d_x);
     cudaFree(d_y);
     cudaFree(d_bias);
+    cudaFree(d_mask_tensor);
+    cudaFree(d_add_val);
 }
