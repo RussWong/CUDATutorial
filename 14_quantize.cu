@@ -44,12 +44,12 @@ bool CheckResult(float *out, float* groudtruth, int nums){
 template<typename T>
 void GenScalePerTensorSymmetricCPU(const T* in_ptr, const int quantization_bit,
                             const int num_elements, T* scale, T* zero_point) {
-  T in_max = *std::max_element(in_ptr, in_ptr + num_elements);
-  T in_min = *std::min_element(in_ptr, in_ptr + num_elements);
-  T out_max = std::max(std::abs(in_max), std::abs(in_min));
+  T in_max = *std::max_element(in_ptr, in_ptr + num_elements);// absmax
+  T in_min = *std::min_element(in_ptr, in_ptr + num_elements);// absmin
+  T out_max = std::max(std::abs(in_max), std::abs(in_min));// Wmax
   // printf("weight_max_cpu is %f, std::abs(in_max) is %f, std::abs(in_min) is %f\n",out_max,std::abs(in_max),std::abs(in_min));
   T denominator = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
-  *scale = out_max / denominator;
+  *scale = out_max / denominator; // Wmax / 127
   *zero_point = 0;
 }
 // py code
@@ -61,6 +61,7 @@ void GenScalePerTensorSymmetricCPU(const T* in_ptr, const int quantization_bit,
 //     zero_point = -np.round(weight_min / scale)
 //     return (scale, zero_point)
 
+// 公式: clip(input / scale .round(), -128, 127)
 template<typename T>
 void QuantizationPerTensorSymmetricCPU(const T* in_ptr, const T scale, const int quantization_bit,
                                    const int num_elements, T* out_ptr) {
@@ -84,10 +85,11 @@ void QuantizationPerTensorSymmetricCPU(const T* in_ptr, const T scale, const int
 template<typename T>
 void GenScalePerChannelSymmetricCPU(const T* in_ptr, const int quantization_bit, const int HW, const int channel,
                             const int num_elements, T* scale, T* zero_point) {
+   // 与per tensor唯一不同在于每个channel的scale不同，所以循环求scale
   for (int cid = 0; cid < channel; cid++){
     int start = cid * HW;
     int end = (cid + 1) * HW;
-    T channel_max = *std::max_element(in_ptr + start, in_ptr + end);
+    T channel_max = *std::max_element(in_ptr + start, in_ptr + end); // absmax
     T channel_min = *std::min_element(in_ptr + start, in_ptr + end);// note: cannot use [] which get a float, must use + to get pointer
     T out_max = std::max(std::abs(channel_max), std::abs(channel_min));
     // printf("weight_max_cpu is %f, std::abs(in_max) is %f, std::abs(in_min) is %f\n",out_max,std::abs(in_max),std::abs(in_min));
@@ -103,6 +105,7 @@ void QuantizationPerChannelSymmetricCPU(const T* in_ptr, const T* scale, const i
   T lower_bound = -upper_bound - 1;
   //printf("scaleCPU is %f\n", scale);
   for(int j = 0; j < num_elements; j++) {
+    // j / HW索引到当前元素的channel ID，然后取出对应channel的scale，做quantize
     T out = std::nearbyint(in_ptr[j] / scale[j / HW]);
     //if (j==328) printf("in_ptrCPU is %f, outCPU is %f\n", in_ptr[j], out);
     out = out > upper_bound ? upper_bound : out;
@@ -110,13 +113,12 @@ void QuantizationPerChannelSymmetricCPU(const T* in_ptr, const T* scale, const i
     out_ptr[j] = out;
   }
 }
-
-// GPU version
+// 以上是CPU上的quantize函数，接下来用CUDA重写
+// GPU device function
 __device__ float gpunearbyint(float a) {
   return std::nearbyint(a);
 }
 
-// fp32 type atomicMax from stackoverflow and nv developer forum: https://forums.developer.nvidia.com/t/cuda-atomicmax-for-float/194207
 //about CAS: https://blog.csdn.net/m0_52153904/article/details/130095643
 //int atomicCAS(int* address, int compare, int val)
 //{
@@ -142,7 +144,8 @@ __device__ float gpunearbyint(float a) {
 
 //  return old;
 //}
-
+// 封装好的atmoicMax不支持fp32类型，所以我们这里需要针对fp32类型重载atomicMax
+// fp32 type atomicMax from stackoverflow and nv developer forum: https://forums.developer.nvidia.com/t/cuda-atomicmax-for-float/194207
 inline __device__ float atomicMax(float *address, float val) {
   int* address_as_i = (int*)address;
   int old = *address_as_i;
@@ -170,7 +173,7 @@ inline __device__ float atomicMin(float *address, float val) {
 }
 
 // get max and min per tensor
-// use block shared memory reduce
+// use block shared memory reduce，即reduce v4，唯一区别只是由reduce_sum变成了reduce_max_min
 template<typename T>
 __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max_ptr,
                                      T* min_ptr, const int channel, const int HW) {
@@ -216,9 +219,10 @@ template<typename T>
 __global__ void ReduceMaxMinPerChannel(const T* input_ptr, const int nums,
                                        T* max_ptr, T* min_ptr, const int num_channels, const int HW) {
   extern __shared__ unsigned char shared_max_min_memory[];
+  // 动态smem需要如下这样去强转成我们的计算类型，以及分配每块的大小，比如L224的+blockDim.x就定义shared_max指向blockDim.x个元素
   T* shared_max = reinterpret_cast<T*>(shared_max_min_memory);
   T* shared_min = shared_max + blockDim.x;
-  // block id represent channel id, if block nums < channel nums, we use a loop on 199 and 229 line. 
+  // block id represent channel id, if block nums < channel nums or thread nums < HW, we use a loop on 239 and 259 line. 
   int cur_channel = blockIdx.x;
   int tid = threadIdx.x;
   int gid = blockIdx.x * blockDim.x + tid;
@@ -227,9 +231,10 @@ __global__ void ReduceMaxMinPerChannel(const T* input_ptr, const int nums,
     shared_max[tid] = FLT_MIN;
     shared_min[tid] = FLT_MAX;
     // thread offset and end offset of each channel
+    // index表示每个线程所取的元素位置，位于第cur channel的第tid偏移
     int index = (HW * cur_channel) + tid;
     int end = HW * (cur_channel + 1);
-
+    // 确定好了index，其他与reduceMinMaxPerTensor差不多
     while (index < end && index < nums) {
       shared_max[tid] = max(shared_max[tid], input_ptr[index]);
       shared_min[tid] = min(shared_min[tid], input_ptr[index]);
@@ -301,7 +306,7 @@ __global__ void QuantizePerChannelSymmetric(const T* in_ptr, const T* scale_ptr,
 
   T upper_bound = static_cast<T>(pow(2.0, quantization_bit - 1)) - 1;
   T lower_bound = -upper_bound - 1;
-
+  // 逐个元素做按照quantize公式做quantize，注意channel ID要先取到，然后去取该channel对应的scale
   while (gid < nums) {
     int channel_index = gid / HW;
     int scale_idx = min(scale_size - 1, channel_index);
@@ -355,7 +360,7 @@ __global__ void QuantizePerTensorSymmetric(const T* in_ptr, const T* scale_ptr,
   T scale = *scale_ptr;
   if (gid==0) printf("scaleGPU is %f\n", scale);
   while (gid < nums) {
-
+    // per tensor quant和per channel quant的最大区别在于这里不用去根据channel ID取对应的scale，而是整个tensor共用一个scale
     T out = gpunearbyint(in_ptr[gid] / scale);
     if (gid==328) printf("328 in_ptr is %f, out is %f\n", in_ptr[gid], out);
     if (gid==1587) printf("1587 in_ptr is %f, out is %f\n", in_ptr[gid], out);
