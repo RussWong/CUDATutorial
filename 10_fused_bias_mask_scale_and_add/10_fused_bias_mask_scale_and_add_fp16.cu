@@ -4,7 +4,7 @@
 typedef __half half;
 typedef __half2 half2;
 // 注意
-// 1. 此融合算子还比较简单，主要融合了几个element wise算子，在L15和L36，把各个子算子的输出保留在寄存器直接喂给下一个算子做计算，而无需中途写回显存
+// 1. 此融合算子还比较简单，主要融合了几个element wise算子，在L15和L39，把各个子算子的输出保留在寄存器直接喂给下一个算子做计算，而无需中途写回显存
 // 2. 下个版本会新增fusedDropout这个稍微复杂点的融合算子，来进一步体会融合算子的开发方法，总的来说，和本节融合算子的思想一样
 template<typename T>
 struct MaskScaleAndElementwiseAddFunctor {
@@ -13,6 +13,7 @@ struct MaskScaleAndElementwiseAddFunctor {
   __device__ T Compute(T x, int64_t i) const {
     // mask和scale先做计算，然后结果再和x做计算，最后element wise相加
     return x * static_cast<T>(static_cast<bool>(mask[i]) * scale) + add_val[i]; 
+  }
   const uint8_t* mask;
   const T* add_val;
   float scale;
@@ -26,7 +27,7 @@ struct MaskScaleAndElementwiseAddFunctor<half> {
   __device__ half Compute(half x, int64_t i) const {
     return x * static_cast<half>(static_cast<bool>(mask[i]) * scale) + add_val[i];
   }
-  // half向量版本的MaskScaleAndElementwiseAdd，不仅支持L31和L32所示的向量化读取，也支持L38所示的向量化计算，这与fp32的向量化是不同的，具体接口可以搜索cuda math api文档
+  // half向量版本的MaskScaleAndElementwiseAdd，不仅支持L32和L33所示的向量化读取，也支持L39所示的向量化计算，这与fp32的向量化是不同的，具体接口可以搜索cuda math api文档
   __device__ half2 ComputeHalf2(half2 x, int64_t i) const {
     const char2* mask_c2 = reinterpret_cast<const char2*>(mask);
     const half2* add_val_h2 = reinterpret_cast<const half2*>(add_val);
@@ -42,14 +43,14 @@ struct MaskScaleAndElementwiseAddFunctor<half> {
   float scale;
 };
 
-// biasAdd的输入两个，x.shape={rows, cols}, bias.shape={cols}, 所以需要在L58通过除余循环读取这cols个bias
+// biasAdd的输入两个，x.shape={rows, cols}, bias.shape={cols}, 所以需要在L59通过除余循环读取这cols个bias
 template<typename FUNCTOR>
 __global__ void FusedBiasAddCUDAKernelHalf2(FUNCTOR functor, const int elem_cnt,
                                         const int bias_size, const half* x, const half* bias,
                                         half* y) {
   const int h2_elem_cnt = elem_cnt / 2; // 读取的粒度由half变成了half2，那自然元素数量就少了一半
   const int h2_bias_size = bias_size / 2;
-  const auto* x_h2 = reinterpret_cast<const half2*>(x); // 强转为向量指针后在L57读取
+  const auto* x_h2 = reinterpret_cast<const half2*>(x); // 强转为向量指针后在L58读取
   const auto* bias_h2 = reinterpret_cast<const half2*>(bias);
   auto* y_h2 = reinterpret_cast<half2*>(y);
   // 保证有限线程数处理完所有数据
