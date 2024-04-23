@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include "cuda_runtime.h"
-
+// 注意: 本kernel注释见fp16版本的fused bias mask scale and add
 template<typename T>
 struct MaskScaleAndElementwiseAddFunctor {
   MaskScaleAndElementwiseAddFunctor(const uint8_t* mask, const T* add_val, float scale)
