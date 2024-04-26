@@ -1,7 +1,7 @@
 #include <bits/stdc++.h>
 #include <cuda.h>
 #include "cuda_runtime.h"
-
+// 注意: v0-v5里面kernel得到的是各个block负责范围内的总和，要想得到最终的和，需要把各个block求得的总和再做reduce sum
 // v6: multi-block reduce final result by two pass
 // latency: 1.815ms
 template <int blockSize>
@@ -64,6 +64,7 @@ __global__ void reduce_v6(float *d_in, float *d_out, int nums){
     BlockSharedMemReduce<blockSize>(smem);
 
     // store: 哪里来回哪里去，把reduce结果写回显存
+    // GridSize个block内部的reduce sum已得出，保存到d_out的每个索引位置
     if (tid == 0) {
         d_out[blockIdx.x] = smem[0];
     }

@@ -18,7 +18,7 @@ __global__ void reduce_v3(float *d_in, float *d_out){
     smem[tid] = d_in[gtid] + d_in[gtid + blockSize];
     __syncthreads();
 
-    // 同v2：在不发生warp divergence的前提下，从之前的当前线程ID加2*线程ID位置然后不断加上*2位置上的数据，改成不断地对半相加，以消除bank conflict
+    // 同v2: 从之前的当前线程ID加2*线程ID位置然后不断加上*2位置上的数据，改成不断地对半相加，以消除bank conflict
     // 此时一个block对d_in这块数据的reduce sum结果保存在id为0的线程上面
     for (unsigned int index = blockDim.x / 2; index > 0; index >>= 1) {
         if (tid < index) {
@@ -28,6 +28,7 @@ __global__ void reduce_v3(float *d_in, float *d_out){
     }
 
     // store: 哪里来回哪里去，把reduce结果写回显存
+    // GridSize个block内部的reduce sum已得出，保存到d_out的每个索引位置
     if (tid == 0) {
         d_out[blockIdx.x] = smem[0];
     }

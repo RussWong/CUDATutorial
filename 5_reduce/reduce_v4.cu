@@ -54,6 +54,7 @@ __global__ void reduce_v4(float *d_in,float *d_out){
         WarpSharedMemReduce(smem, tid);
     }
     // store: 哪里来回哪里去，把reduce结果写回显存
+    // GridSize个block内部的reduce sum已得出，保存到d_out的每个索引位置
     if (tid == 0) {
         d_out[blockIdx.x] = smem[0];
     }

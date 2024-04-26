@@ -15,7 +15,7 @@ __global__ void reduce_v2(float *d_in,float *d_out){
     smem[tid] = d_in[gtid];
     __syncthreads();
 
-    // 基于v1作出改进：在不发生warp divergence的前提下，从之前的当前线程ID加2*线程ID位置然后不断加上*2位置上的数据，改成不断地对半相加，以消除bank conflict
+    // 基于v1作出改进: 从之前的当前线程ID加2*线程ID位置然后不断加上*2位置上的数据，改成不断地对半相加，以消除bank conflict
     // 此时一个block对d_in这块数据的reduce sum结果保存在id为0的线程上面
     for (unsigned int index = blockDim.x / 2; index > 0; index >>= 1) {
         if (tid < index) {
