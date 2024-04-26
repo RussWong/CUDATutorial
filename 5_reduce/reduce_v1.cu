@@ -178,7 +178,7 @@ int main(){
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
-    reduce_v0<blockSize><<<Grid,Block>>>(d_a, d_out);
+    reduce_v1<blockSize><<<Grid,Block>>>(d_a, d_out);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
