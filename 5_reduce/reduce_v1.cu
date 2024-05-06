@@ -118,14 +118,14 @@ __global__ void reduce_v1(float *d_in,float *d_out){
     int gtid = threadIdx.x + blockIdx.x * blockSize;
     // load: 每个线程加载一个元素到shared mem对应位置
     __shared__ float smem[blockSize];
-    smem[tid] = d_int[gtid];
+    smem[tid] = d_in[gtid];
     // 每对shared memory做读写操作都需要加__syncthreads保证一个block内的threads此刻都同步，以防结果错误
     __syncthreads();
 
     for(int index = 1; index < blockDim.x; index *= 2) {
         // 算法思路和v0一致，仅仅是用位运算替代了v0 if语句中的除余操作
         if ((tid & (2 * index - 1)) == 0){
-            smem[tid] =+ smem[tid + index];
+            smem[tid] += smem[tid + index];
         }
         __syncthreads();
     }
