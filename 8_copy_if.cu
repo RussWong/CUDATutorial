@@ -3,6 +3,7 @@
 #include "cuda_runtime.h"
 #include "cooperative_groups.h"
 //#define THREAD_PER_BLOCK 256
+// 注意：本节视频将会在后面重录，现有视频有很多没有讲清楚的地方
 // 这种warp和shared在老的gpu上面会很有成效，但是在turing后的GPU，nvcc编译器优化了很多，所以导致效果不明显
 // cpu
 int filter(int *dst, int *src, int n) {
@@ -26,7 +27,7 @@ int filter(int *dst, int *src, int n) {
 // block level, use block level atomics based on shared memory
 // __global__ 
 // void filter_shared_k(int *dst, int *nres, const int* src, int n) {
-//   // 计数器声明为shared memory，因为这是所有线程都会访问的
+//   // 计数器声明为shared memory，去计数各个block范围内大于0的数量
 //   __shared__ int l_n;
 //   int gtid = blockIdx.x * blockDim.x + threadIdx.x;
 //   int total_thread_num = blockDim.x * gridDim.x;
@@ -38,17 +39,17 @@ int filter(int *dst, int *src, int n) {
 //       l_n = 0;
 //     __syncthreads();
 
-//     // 每个block内部，大于0的数量(l_n)和每个大于0的thread offset(pos)，比如1 2 4号线程都大于0，那么对于4号线程来说它的pos = 3
 //     int d, pos;
-
+//     // l_n表示每个block范围内大于0的数量，block内的线程都可访问
+//     // pos是每个线程私有的寄存器，且作为atomicAdd的返回值，表示当前线程对l_n原子加1之前的l_n，比如1 2 4号线程都大于0，那么对于4号线程来说l_n = 3, pos = 2
 //     if(i < n && src[i] > 0) {
-//         //pos: src[thread]>0的thread在当前block的index
 //         pos = atomicAdd(&l_n, 1);
 //     }
 //     __syncthreads();
 
 //     // 每个block选出tid=0作为leader
-//     //l eader把每个block的大于0的数量l_n累加到全局计数器(nres),即所有block的局部计数器做一个 reduce聚合
+//     // leader把每个block的l_n累加到全局计数器(nres),即所有block的局部计数器做一个reduce sum
+//     // 注意: 下下行原子加返回的l_n为全局计数器nres原子加l_n之前的nres，比如对于block1，已知原子加前，nres = 2, l_n = 3，原子加后, nres = 2+3, 返回的l_n = 2
 //     if(threadIdx.x == 0)
 //       l_n = atomicAdd(nres, l_n);
 //     __syncthreads();
@@ -69,7 +70,7 @@ int filter(int *dst, int *src, int n) {
 //warp level, use warp-aggregated atomics
 __device__ int atomicAggInc(int *ctr) {
   unsigned int active = __activemask();
-  int leader = 0;
+  int leader = __ffs(active) - 1; // 视频所示代码这里有误，leader应该表示warp里面第一个src[threadIdx.x]>0的threadIdx.x
   int change = __popc(active);//warp mask中为1的数量
   int lane_mask_lt;
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lane_mask_lt));
@@ -77,16 +78,16 @@ __device__ int atomicAggInc(int *ctr) {
   int warp_res;
   if(rank == 0)//leader thread of every warp
     warp_res = atomicAdd(ctr, change);//compute global offset of warp
-  warp_res = __shfl_sync(active, warp_res, leader);//broadcast to every thread
-  return warp_res + rank; // global offset + local offset = final offset，即L86表示的src[i]的最终的索引位置
+  warp_res = __shfl_sync(active, warp_res, leader);//broadcast warp_res of leader thread to every active thread
+  return warp_res + rank; // global offset + local offset = final offset，即L91表示的atomicAggInc(nres), 为src[i]的最终的写入到dst的位置
 }
 
 __global__ void filter_warp_k(int *dst, int *nres, const int *src, int n) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   if(i >= n)
     return;
-  if(src[i] > 0)
-    // 以上L70只是计算当前thread负责数据的全局offset
+  if(src[i] > 0) // 过滤出src[i] > 0 的线程，比如warp0里面只有0号和1号线程的src[i]>0，那么只有0号和1号线程运行L91，对应的L72的__activemask()为110000...00
+    // 以上L71函数计算当前thread负责数据的全局offset
     dst[atomicAggInc(nres)] = src[i];
 }
 
