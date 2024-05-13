@@ -57,16 +57,16 @@ struct GeluFunctor<half> {
   }
   // Note: when you have ampere GPU, you can enable the "apply2" method to get performance improvement by half2 intrinsic.
   //__device__ void apply2(half* y, const half* x) const {
-    //const half2 x2 = *(reinterpret_cast<const half2*>(x));
+    //const half2 x2 = *(reinterpret_cast<const half2*>(x)); // L89行已经求出了offset，这里直接把指针转换为向量类型并解引用即可得到向量数据
     //const float2 tanh_in = __half22float2(
      //   __hmul2(__float2half2_rn(alpha),
       //          __hadd2(x2, __hmul2(__hmul2(__hmul2(__float2half2_rn(beta), x2), x2), x2))));
     //float2 tanh_out;
-    //tanh_out.x = TanhApprox(tanh_in.x);
+    //tanh_out.x = TanhApprox(tanh_in.x); // tanh之所以转为fp32类型计算，是因为NV GPU貌似不支持tanh的half intrinsic，理想状况下，当然是希望所有计算都是half2一把梭
     //tanh_out.y = TanhApprox(tanh_in.y);
     //const half2 y2 = __hmul2(__hmul2(__float2half2_rn(0.5F), x2),
     //                                 __hadd2(__float2half2_rn(1.0F), __float22half2_rn(tanh_out)));
-    //*reinterpret_cast<half2*>(y) = y2;
+    //*reinterpret_cast<half2*>(y) = y2; // 向量化写回结果到显存
   //}
 };
 
@@ -85,7 +85,7 @@ __global__ void FP16GeluCUDAKernel(const __half* x,
   __half y_reg[VecSize];
   using ArrT = AlignedVector<__half, VecSize>; // 声明向量类型
   for (; offset < n; offset += stride) {
-    // 先强转为向量，再传入offset读取对应数据
+    // 先求出每个线程所读向量的起始offset
     const __half* in = x + offset;
 
     if (VecSize == 1){
