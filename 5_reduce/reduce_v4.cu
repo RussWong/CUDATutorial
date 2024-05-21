@@ -6,8 +6,8 @@
 //latency: 0.694ms
 __device__ void WarpSharedMemReduce(volatile float* smem, int tid){
     // CUDA不保证所有的shared memory读操作都能在写操作之前完成，因此存在竞争关系，可能导致结果错误
-    // 比如smem[tid] += smem[tid + 16] => smem[3] += smem[16], smem[16] += smem[32]
-    // 此时L9中smem[16]的读和写到底谁在前谁在后，这是不确定的，所以在Volta架构后最后加入中间寄存器(L11)配合syncwarp保证读写依赖
+    // 比如smem[tid] += smem[tid + 16] => smem[0] += smem[16], smem[16] += smem[32]
+    // 此时L9中smem[16]的读和写到底谁在前谁在后，这是不确定的，所以在Volta架构后最后加入中间寄存器(L11)配合syncwarp和volatile(使得不会看见其他线程更新smem上的结果)保证读写依赖
     float x = smem[tid];
     if (blockDim.x >= 64) {
       x += smem[tid + 32]; __syncwarp();

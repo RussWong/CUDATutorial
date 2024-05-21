@@ -19,7 +19,7 @@
 // 1. printf cpu res and gpu res of each kernel
 // 2. use if(tid==0) to get the gpu output and key variable of one thread
 // 3. use grid step loop to conveniently debug by launch one thread
-
+// 注意: 正在添加图解
 bool CheckResult(float *out, float* groudtruth, int nums){
     for (int i = 0; i < nums; i++){
       if (groudtruth[i] != out[i]) {
@@ -187,7 +187,7 @@ __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max
   int gid = blockDim.x * blockIdx.x + tid;
   shared_max[tid] = FLT_MIN;
   shared_min[tid] = FLT_MAX;
-
+  // 1. block数量可能无法覆盖总数据量，先以total_thread_num把block和block范围外的数据给比较一遍
   for (int i = gid; i < nums; i += total_thread_num) {
       shared_max[tid] = max(shared_max[tid], input_ptr[i]);
       shared_min[tid] = min(shared_min[tid], input_ptr[i]);
@@ -197,7 +197,7 @@ __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max
       //}
   }
   __syncthreads();
-  
+  // 2. 至此，所有block已经覆盖总数据量，于是开始在block内部先比较大小，又称intra-block范围的比较
   for (int s = blockDim.x / 2; s > 0; s >>= 1) {
     if (tid < s && gid < nums) {
       shared_max[tid] = max(shared_max[tid], shared_max[tid + s]);
@@ -205,7 +205,7 @@ __global__ void ReduceMaxMinPerTensor(const T* input_ptr, const int nums, T* max
     }
     __syncthreads();
   }
-
+  // 3. 最后，每个block里面的shared mem的0号位置都保存了block内部的最大最小值，此时使用atomic对所有block来进行比较
   if (tid == 0) {
       atomicMax(max_ptr, shared_max[0]);
       atomicMin(min_ptr, shared_min[0]);
