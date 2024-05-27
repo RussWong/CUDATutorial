@@ -44,3 +44,5 @@ please ensure:
 ### v2.2
 * add fp32/fp16 gemv(vec * mat,mat is row major)
 * add some code explaination(WIP)
+### v2.6
+* add fp32 dropout

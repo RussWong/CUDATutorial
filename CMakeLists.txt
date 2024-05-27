@@ -242,3 +242,11 @@ target_link_libraries(
     15_2_gemv PUBLIC
     -lcudart
     -lcudadevrt)
+#16 dropout
+add_executable(16_dropout
+    16_fused_dropout/16_dropout.cu
+)
+target_link_libraries(
+    16_dropout PUBLIC
+    -lcudart
+    -lcudadevrt)
