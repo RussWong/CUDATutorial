@@ -6,9 +6,6 @@
 // biasadd + mask + scale + elemwise_add四个算子的融合
 // （x + bias） * mask * scale + addend;
 
-constexpr int n = 100000;
-constexpr int bais_size = 10;
-
 template<typename T>
 struct MaskScaleAndElemwiseAddFunctor
 {
@@ -28,29 +25,29 @@ struct MaskScaleAndElemwiseAddFunctor
     float _scale;
 };
 
-template<typename FUNCTOR, typename T>
-__global__ void FusedBaisAdd(FUNCTOR functor, T * dx, T * dy, T * d_bias)
+template<int biasSize, typename FUNCTOR, typename T>
+__global__ void FusedBaisAdd(FUNCTOR functor, T * dx, T * dy, T * d_bias, const int n, const int bias_size)
 {
     int gid = blockDim.x * blockIdx.x + threadIdx.x;
 
     for (int i = gid; i < n; i += gridDim.x * blockDim.x)
     {
-        T tmp = dx[i] + d_bias[i % bais_size];
+        T tmp = dx[i] + d_bias[i % bias_size];
         dy[i] = functor(tmp, i);
     }
 }
 
 // 使用向量化进行存取
-template<typename FUNCTOR, typename T>
-__global__ void FusedBaisAddVecSmem(FUNCTOR functor, T * dx, T * dy, T * d_bias)
+template<int biasSize, typename FUNCTOR, typename T>
+__global__ void FusedBaisAddVecSmem(FUNCTOR functor, T * dx, T * dy, T * d_bias, const int n, const int bias_size)
 {
     int gid = blockDim.x * blockIdx.x + threadIdx.x;
     int tid = threadIdx.x;
 
-    __shared__ T smem[bais_size];
+    __shared__ T smem[biasSize];
 
     // 将d_bias放在shared memory上
-    if (tid < bais_size)
+    if (tid < bias_size)
         smem[tid] = d_bias[tid];
     __syncthreads();
 
@@ -59,16 +56,16 @@ __global__ void FusedBaisAddVecSmem(FUNCTOR functor, T * dx, T * dy, T * d_bias)
         float4 a = reinterpret_cast<float4 *>(dx)[i];
         float4 b;
 
-        b.x = functor(a.x + smem[(i * 4) % bais_size], i * 4);
-        b.y = functor(a.y + smem[(i * 4 + 1) % bais_size], i * 4 + 1);
-        b.z = functor(a.z + smem[(i * 4 + 2) % bais_size], i * 4 + 2);
-        b.w = functor(a.w + smem[(i * 4 + 3) % bais_size], i * 4 + 3);
+        b.x = functor(a.x + smem[(i * 4) % bias_size], i * 4);
+        b.y = functor(a.y + smem[(i * 4 + 1) % bias_size], i * 4 + 1);
+        b.z = functor(a.z + smem[(i * 4 + 2) % bias_size], i * 4 + 2);
+        b.w = functor(a.w + smem[(i * 4 + 3) % bias_size], i * 4 + 3);
 
         reinterpret_cast<float4*>(dy)[i] = b;
     }
 }
 
-bool CheckRight(float * y, float * groudTruth)
+bool CheckRight(float * y, float * groudTruth, const int n)
 {
     for (int i = 0; i < n; ++i)
     {
@@ -84,6 +81,9 @@ bool CheckRight(float * y, float * groudTruth)
 
 int main()
 {
+    constexpr int n = 100000;
+    constexpr int bias_size = 10;
+    
     float scale = 0.5;
     uint8_t * mask_tensor = new uint8_t[n];
     float * add_val = new float[n];
@@ -96,28 +96,28 @@ int main()
 
     float * x = (float *)malloc(sizeof(float) * n);
     float * y = (float *)malloc(sizeof(float) * n);
-    float * bias = (float *)malloc(sizeof(float) * bais_size);
+    float * bias = (float *)malloc(sizeof(float) * bias_size);
     for (int i = 0; i < n; ++i)
     {
         x[i] = (float)(i);
         y[i] = 0.0f;
     }
-    for (int i = 0; i < bais_size; ++i)
+    for (int i = 0; i < bias_size; ++i)
         bias[i] = i;
 
     float * groudTruth = (float *)malloc(sizeof(float) * n);
     for (int i = 0; i < n; ++i)
     {
-        groudTruth[i] = (x[i] + bias[i % bais_size]) * static_cast<float>(static_cast<bool>(mask_tensor[i]) * scale) + add_val[i];
+        groudTruth[i] = (x[i] + bias[i % bias_size]) * static_cast<float>(static_cast<bool>(mask_tensor[i]) * scale) + add_val[i];
     }
 
     float * dx, * dy, * d_bias;
     cudaMalloc((void **)&dx, sizeof(float) * n);
     cudaMalloc((void **)&dy, sizeof(float) * n);
-    cudaMalloc((void **)&d_bias, sizeof(float) * bais_size);
+    cudaMalloc((void **)&d_bias, sizeof(float) * bias_size);
     cudaMemcpy(dx, x, sizeof(float) * n, cudaMemcpyHostToDevice);
     cudaMemcpy(dy, y, sizeof(float) * n, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_bias, bias, sizeof(float) * bais_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_bias, bias, sizeof(float) * bias_size, cudaMemcpyHostToDevice);
     uint8_t * d_mask_tensor;
     float * d_add_val;
     cudaMalloc((void **)&d_mask_tensor, sizeof(uint8_t) * n);
@@ -142,7 +142,7 @@ int main()
     cudaEventRecord(start);
     
     for (int i = 0; i < 1000; ++i)
-        FusedBaisAdd<<<Grid, Block>>>(functor, dx, dy, d_bias);
+        FusedBaisAdd<bias_size><<<Grid, Block>>>(functor, dx, dy, d_bias, n, bias_size);
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -150,7 +150,7 @@ int main()
 
     cudaMemcpy(y, dy, sizeof(float) * n, cudaMemcpyDeviceToHost);
 
-    bool isRight = CheckRight(y, groudTruth);
+    bool isRight = CheckRight(y, groudTruth, n);
     if (isRight)
         printf("结果正确\n");
     else
