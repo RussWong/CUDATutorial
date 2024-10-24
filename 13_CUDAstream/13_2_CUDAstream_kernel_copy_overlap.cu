@@ -41,7 +41,7 @@ int main()
     int bs = 256;
 
     /* 1D grid */
-    int s = ceil((size_per_stream + bs - 1.) / bs);
+    int s = ceil((nums_per_stream + bs -1.) / bs);
     dim3 grid(s);
 
     FLOAT *dx, *hx;
